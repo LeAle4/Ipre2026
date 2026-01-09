@@ -385,14 +385,14 @@ if __name__ == "__main__":
         red_mask, entropy_vals, metadata = create_entropy_red_mask(
             image=img_name,
             target_size=1024,
-            window_size=16,
-            entropy_func=compute_sample_entropy,
+            window_size=64,
+            entropy_func=compute_approximate_entropy,
             entropy_params={'m': 2, 'r': 0.2},
             output_dir="output/test_results",
             save_individual=False,
             red_intensity=0.3,
             show_results=False,  # We'll show manually after
-            min_entropy=0,
+            min_entropy=2.0,
             max_entropy=3.0
         )
         
