@@ -23,3 +23,5 @@ rasterio==1.5.0
 shapely==2.1.2
 six==1.17.0
 tzdata==2025.3
+libpysal
+esda
