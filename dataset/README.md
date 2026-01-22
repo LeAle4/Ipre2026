@@ -8,18 +8,34 @@ This directory contains tools for extracting geo-referenced images from orthomos
 project/
 ├── data/
 │   ├── unita_raw/               # Raw extracted images for UNITA
-│   ├── unita_geos/              # UNITA geopackage files
+│   ├── unita_geos/              # Class 1 (geo) images only - UNITA
 │   ├── unita_polygons/          # UNITA polygon metadata
 │   ├── chugchug_raw/            # Raw extracted images for CHUG
+│   ├── chug_geos/               # Class 1 (geo) images only - CHUG
+│   ├── chug_polygons/           # CHUG polygon metadata
 │   ├── lluta_raw/               # Raw extracted images for LLUTA
+│   ├── lluta_geos/              # Class 1 (geo) images only - LLUTA
+│   ├── lluta_polygons/          # LLUTA polygon metadata
+│   ├── salvador_raw/            # Raw extracted images for SALVADOR
+│   ├── granllama_raw/           # Raw extracted images for GRANLLAMA
 │   └── [other area directories]
 └── dataset/
+    ├── handle.py                # Centralized file handling and paths
     ├── extract_polygon_images.py
     ├── analysis.py
     └── README.md
 ```
 
 ## Overview
+
+### handle.py
+**New centralized module for file handling and path management.** Provides:
+- **Common directory paths** - All data directories for raw, geos, and polygon data
+- **Dataset configuration** - DATASETS dictionary with flexible configuration for all areas
+- **File I/O utilities** - `load_json()`, `save_json()` functions for consistent data handling
+- **Dataset helpers** - `get_dataset_info()`, `get_all_datasets()` for easy dataset access
+
+This module eliminates code duplication and provides a single source of truth for all paths and common functions used across the project.
 
 ### extract_polygon_images.py
 Extracts images from orthomosaic TIF files for each polygon in a geopackage. For each polygon, it generates:
@@ -28,8 +44,8 @@ Extracts images from orthomosaic TIF files for each polygon in a geopackage. For
 - **Metadata JSON** containing bounding box coordinates, CRS, image shape, and dimensions in meters
 
 ### analysis.py
-Analyzes the spatial dimensions of extracted geo polygons across multiple datasets. It:
-- Loads metadata from previously extracted images
+Analyzes the spatial dimensions of extracted geo polygons across multiple datasets. Now uses `handle.py` for path and file management. It:
+- Loads metadata from previously extracted images using centralized paths
 - Calculates statistics for polygon dimensions (width, height, area)
 - Removes outliers using the IQR (Interquartile Range) method
 - Estimates pixel scale and suggests sliding window sizes
@@ -150,6 +166,50 @@ Press `Ctrl+C` or close the matplotlib windows to exit after viewing plots.
 
 ## Customization
 
+### Using handle.py for Custom Paths
+
+The `handle.py` module provides centralized path management. To use it in your own scripts:
+
+```python
+from handle import (
+    UNITA_GEOS_DIR,     # Path to UNITA geos directory
+    CHUG_SUMMARY_PATH,  # Path to CHUG summary.json
+    load_json,          # Load JSON files
+    save_json,          # Save JSON files
+    get_dataset_info,   # Get dataset configuration
+    get_all_datasets    # List all available datasets
+)
+
+# Load a summary file
+summary = load_json(UNITA_SUMMARY_PATH)
+
+# Get information for a specific dataset
+dataset = get_dataset_info('unita')
+print(dataset['geos_dir'])  # Prints path to unita_geos directory
+
+# List all datasets with complete directory structure
+datasets = get_all_datasets()  # Returns ['unita', 'chug', 'lluta']
+
+# Save data with automatic directory creation
+save_json(my_data, output_path / "results.json")
+```
+
+#### Adding New Datasets
+
+To add a new dataset area, edit the `DATASETS` dictionary in `handle.py`:
+
+```python
+DATASETS = {
+    'mynewarea': {
+        'name': 'MYNEWAREA',
+        'raw_dir': DATA_DIR / "mynewarea_raw",
+        'geos_dir': DATA_DIR / "mynewarea_geos",
+        'polygons_dir': DATA_DIR / "mynewarea_polygons",
+        'summary_path': DATA_DIR / "mynewarea_raw" / "summary.json"
+    }
+}
+```
+
 ### Modifying extract_polygon_images.py
 
 #### Change Output Format
@@ -189,6 +249,21 @@ if row['class'] == 1:  # Only process class 1 (geos)
 
 ### Modifying analysis.py
 
+#### Using Centralized Paths
+
+The script now imports paths from `handle.py`:
+```python
+from handle import (
+    UNITA_SUMMARY_PATH,
+    CHUG_SUMMARY_PATH,
+    LLUTA_SUMMARY_PATH,
+    load_json
+)
+
+# Load summary files using centralized paths
+summary = load_json(UNITA_SUMMARY_PATH)
+```
+
 #### Change Outlier Detection
 Modify the IQR multiplier:
 ```python
@@ -197,13 +272,21 @@ def _remove_outliers_iqr(data, multiplier=1.5):
     # multiplier=1.0 is more aggressive, 3.0 is more lenient
 ```
 
-#### Customize Dataset Names and Paths
-Update the paths and names at the top:
+#### Add New Dataset to Analysis
+
+To analyze an additional dataset, use the centralized configuration:
 ```python
-# Lines 8-10
-UNITA_PATH = BASE_DIR / "data/custom_unita/summary.json"
-CHUG_PATH = BASE_DIR / "data/custom_chug/summary.json"
-LLUTA_PATH = BASE_DIR / "data/custom_lluta/summary.json"
+from handle import get_dataset_info, load_json
+
+# Get dataset configuration
+new_dataset = get_dataset_info('salvador')
+
+# Load its summary
+summary = load_json(new_dataset['summary_path'])
+
+# Add to analysis
+summaries.append(summary)
+dataset_names.append(new_dataset['name'])
 ```
 
 #### Adjust Histogram Bins

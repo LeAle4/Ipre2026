@@ -4,19 +4,24 @@ import numpy as np
 import shutil
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-UNITA_PATH = BASE_DIR / "data/unita_raw/summary.json"
-CHUG_PATH = BASE_DIR / "data/chugchug_raw/summary.json"
-LLUTA_PATH = BASE_DIR / "data/lluta_raw/summary.json"
+from handle import (
+    PROJECT_DIR,
+    UNITA_SUMMARY_PATH,
+    CHUG_SUMMARY_PATH,
+    LLUTA_SUMMARY_PATH,
+    load_json,
+    save_json
+)
+
+# Aliases for backward compatibility
+BASE_DIR = PROJECT_DIR
+UNITA_PATH = UNITA_SUMMARY_PATH
+CHUG_PATH = CHUG_SUMMARY_PATH
+LLUTA_PATH = LLUTA_SUMMARY_PATH
 
 # ============================================================================
 # CALCULATION FUNCTIONS
 # ============================================================================
-
-def load_json(path):
-    """Load JSON file from path."""
-    with open(path, 'r') as file:
-        return json.load(file)
 
 def get_geos(summary):
     """Extract all class 1 (geo) polygons from summary."""
