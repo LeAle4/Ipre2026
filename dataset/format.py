@@ -152,8 +152,68 @@ def make_random_crops(image, window_size, n_crops, seed=None):
     
     return crops
 
-def make_fixed_crops(window_size, n_crops, stride):
-    pass
+def make_fixed_crops(image, window_size, n_crops, stride=None):
+    """
+    Generate deterministic crops by sliding from the top-left with a fixed offset.
+
+    Args:
+        image: Input image (numpy array, H x W or H x W x C)
+        window_size: Size of each crop (int)
+        n_crops: Number of crops to return
+        stride: Optional step between crop centers. Can be an int or (x, y) tuple.
+                If not provided, the stride is computed to evenly spread the crops
+                across the image based on its size and the requested crop count.
+
+    Returns:
+        List of tuples (crop, mask) where crop is the cropped image and mask indicates valid pixels
+    """
+    if n_crops <= 0:
+        return []
+
+    h, w = image.shape[:2]
+    half_size = window_size // 2
+
+    def _parse_stride(step):
+        if isinstance(step, (list, tuple, np.ndarray)):
+            if len(step) != 2:
+                raise ValueError("stride tuple must have length 2 (x, y)")
+            return float(step[0]), float(step[1])
+        return float(step), float(step)
+
+    # Compute grid of centers
+    if stride is None:
+        aspect = w / h if h != 0 else 1.0
+        cols = max(1, int(np.ceil(np.sqrt(n_crops * aspect))))
+        rows = max(1, int(np.ceil(n_crops / cols)))
+
+        x_start, x_end = half_size, max(half_size, w - half_size)
+        y_start, y_end = half_size, max(half_size, h - half_size)
+
+        xs = np.linspace(x_start, x_end, num=cols)
+        ys = np.linspace(y_start, y_end, num=rows)
+    else:
+        stride_x, stride_y = _parse_stride(stride)
+        if stride_x <= 0 or stride_y <= 0:
+            raise ValueError("stride must be positive")
+
+        xs = np.arange(half_size, max(w, half_size) + stride_x, stride_x)
+        ys = np.arange(half_size, max(h, half_size) + stride_y, stride_y)
+
+    centers = []
+    for y in ys:
+        for x in xs:
+            centers.append((int(round(x)), int(round(y))))
+            if len(centers) >= n_crops:
+                break
+        if len(centers) >= n_crops:
+            break
+
+    crops = []
+    for center in centers:
+        crop, mask = crop_image(image, center, window_size)
+        crops.append((crop, mask))
+
+    return crops
 
 def make_polygon_thresholds_crops(window_size, n_crops, stride, threshold=0.9):
     pass

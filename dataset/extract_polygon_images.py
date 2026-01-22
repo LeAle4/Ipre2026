@@ -16,7 +16,7 @@ import rasterio
 from rasterio.windows import Window
 import matplotlib.pyplot as plt
 import numpy as np
-from shapely.geometry import MultiPolygon
+from shapely.geometry import MultiPolygon, Polygon
 from pyproj import Geod
 
 # Default input files
@@ -263,11 +263,29 @@ def extract_polygon_images(polygon_idx, geometry, gdf_crs, polygon_class, ortho_
         overlay_chunk = ortho.read(window=overlay_win)
         overlay_transform = ortho.window_transform(overlay_win)
 
-    # Handle MultiPolygon
+    def _poly_to_coords(poly: Polygon):
+        """Convert polygon to 2D coordinate lists, dropping any Z values."""
+        def _to_xy(seq):
+            xy = []
+            for coord in seq:
+                # coord can be (x, y) or (x, y, z, ...); keep first two
+                xy.append((float(coord[0]), float(coord[1])))
+            return xy
+
+        exterior = _to_xy(poly.exterior.coords) if poly.exterior else []
+        interiors = [_to_xy(interior.coords) for interior in poly.interiors]
+        return {
+            'exterior': exterior,
+            'interiors': interiors
+        }
+
+    # Handle MultiPolygon and keep coordinate lists for metadata
     if isinstance(geometry, MultiPolygon):
         polygons = [p for p in geometry.geoms]
+        polygon_points = [_poly_to_coords(p) for p in polygons]
     else:
         polygons = [geometry]
+        polygon_points = [_poly_to_coords(geometry)]
 
     # Calculate bounding box size in meters
     bbox_size = calculate_bbox_size_meters(geometry.bounds, gdf_crs)
@@ -301,6 +319,7 @@ def extract_polygon_images(polygon_idx, geometry, gdf_crs, polygon_class, ortho_
         },
         'bbox_size_meters': bbox_size,
         'crs': str(gdf_crs),
+        'polygon_points': polygon_points,
         'image_shape': {
             'height': ortho_chunk.shape[1],
             'width': ortho_chunk.shape[2],

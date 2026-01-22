@@ -10,7 +10,7 @@ from pathlib import Path
 from format import make_random_crops, fill_with_noise, TEST_DIR
 
 # Configuration
-WINDOW_SIZES = [128, 256, 512]
+WINDOW_SIZES = [122, 244, 488]
 N_CROPS_PER_IMAGE = 10
 NOISE_LEVELS = [0.0, 0.5, 1.0]  # 0=avg color, 0.5=blend, 1.0=full noise
 NOISE_TYPES = ['gaussian', 'uniform']

@@ -321,7 +321,7 @@ copy_geos_files_by_area(
 ```bash
 cd dataset
 python extract_polygon_images.py \
-  --layers ../data/unita_polygons/ML_labeling_UNITA.gpkg \
+  --layers ../data/unita_raw/ML_labeling_UNITA.gpkg \
   --ortho ../data/unita_raw/CerroUnita_ortomosaico.tif \
   --output ../data/unita_raw \
   --limit 50  # Start with first 50 for testing
