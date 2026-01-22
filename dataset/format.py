@@ -215,8 +215,105 @@ def make_fixed_crops(image, window_size, n_crops, stride=None):
 
     return crops
 
-def make_polygon_thresholds_crops(window_size, n_crops, stride, threshold=0.9):
-    pass
+def make_polygon_thresholds_crops(image, polygon_vertices, window_size, n_crops, stride, threshold=0.1):
+    """
+    Generate crops uniformly distributed across a polygon with minimum overlap threshold.
+    
+    Works like make_fixed_crops but only includes crops where the intersection area
+    between the crop window and the polygon is at least `threshold` percent of the crop area.
+    Crops are uniformly distributed across the entire polygon area.
+    
+    Args:
+        image: Input image (numpy array, H x W or H x W x C)
+        polygon_vertices: Vertices of the polygon (list/array of (x, y) tuples)
+        window_size: Size of each crop (int)
+        n_crops: Number of crops to return (or maximum if fewer valid crops exist)
+        stride: Step between crop centers. Can be an int or (x, y) tuple.
+                If not provided, the stride is computed to evenly spread the crops
+                across the image based on its size and the requested crop count.
+        threshold: Minimum overlap ratio (0-1). Default is 0.1 (10%)
+    
+    Returns:
+        List of tuples (crop, mask) where crop is the cropped image and mask indicates valid pixels
+    """
+    if n_crops <= 0:
+        return []
+    
+    # Create polygon from vertices
+    polygon = shapely.Polygon(polygon_vertices)
+    crop_area = window_size * window_size
+    
+    h, w = image.shape[:2]
+    half_size = window_size // 2
+    
+    def _parse_stride(step):
+        if isinstance(step, (list, tuple, np.ndarray)):
+            if len(step) != 2:
+                raise ValueError("stride tuple must have length 2 (x, y)")
+            return float(step[0]), float(step[1])
+        return float(step), float(step)
+    
+    # Compute grid of centers
+    if stride is None:
+        aspect = w / h if h != 0 else 1.0
+        cols = max(1, int(np.ceil(np.sqrt(n_crops * aspect))))
+        rows = max(1, int(np.ceil(n_crops / cols)))
+
+        x_start, x_end = half_size, max(half_size, w - half_size)
+        y_start, y_end = half_size, max(half_size, h - half_size)
+
+        xs = np.linspace(x_start, x_end, num=cols)
+        ys = np.linspace(y_start, y_end, num=rows)
+    else:
+        stride_x, stride_y = _parse_stride(stride)
+        if stride_x <= 0 or stride_y <= 0:
+            raise ValueError("stride must be positive")
+
+        xs = np.arange(half_size, max(w, half_size) + stride_x, stride_x)
+        ys = np.arange(half_size, max(h, half_size) + stride_y, stride_y)
+    
+    # Collect all valid crops (centers and their indices)
+    valid_crops_data = []
+    for y_idx, y in enumerate(ys):
+        for x_idx, x in enumerate(xs):
+            center = (int(round(x)), int(round(y)))
+            
+            # Create crop square as shapely box
+            crop_box = shapely.box(
+                center[0] - half_size,
+                center[1] - half_size,
+                center[0] + half_size,
+                center[1] + half_size
+            )
+            
+            # Calculate intersection area
+            intersection = polygon.intersection(crop_box)
+            intersection_area = intersection.area
+            
+            # Check if overlap threshold is met
+            if intersection_area / crop_area >= threshold:
+                valid_crops_data.append((y_idx, x_idx, center))
+    
+    # If we have fewer valid crops than requested, return all of them
+    if len(valid_crops_data) <= n_crops:
+        crops = []
+        for y_idx, x_idx, center in valid_crops_data:
+            crop, mask = crop_image(image, center, window_size)
+            crops.append((crop, mask))
+        return crops
+    
+    # Uniformly sample n_crops from valid crops
+    # Calculate step size to uniformly distribute selections
+    step = len(valid_crops_data) / n_crops
+    selected_indices = [int(i * step) for i in range(n_crops)]
+    
+    crops = []
+    for idx in selected_indices:
+        y_idx, x_idx, center = valid_crops_data[idx]
+        crop, mask = crop_image(image, center, window_size)
+        crops.append((crop, mask))
+    
+    return crops
 
 def create_negative_samples(area, n_samples, window_size, positive_polygon_coords, seed=None):
     pass

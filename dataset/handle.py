@@ -26,7 +26,7 @@ LLUTA_GEOS_DIR = DATA_DIR / "lluta_geos"
 
 # Polygon directories
 UNITA_POLYGONS_DIR = DATA_DIR / "unita_polygons"
-CHUG_POLYGONS_DIR = DATA_DIR / "chug_polygons"
+CHUG_POLYGONS_DIR = DATA_DIR / "chugchug_polygons"
 LLUTA_POLYGONS_DIR = DATA_DIR / "lluta_polygons"
 
 # Summary JSON paths
