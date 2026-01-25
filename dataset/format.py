@@ -286,13 +286,20 @@ def make_polygon_thresholds_crops(image, polygon_vertices, window_size, n_crops,
                 center[1] + half_size
             )
             
-            # Calculate intersection area
-            intersection = polygon.intersection(crop_box)
-            intersection_area = intersection.area
-            
             # Check if overlap threshold is met
-            if intersection_area / crop_area >= threshold:
-                valid_crops_data.append((y_idx, x_idx, center))
+            # For threshold close to 1.0, use strict containment check
+            if threshold >= 0.9999:
+                # Crop must be entirely within polygon
+                if polygon.contains(crop_box):
+                    valid_crops_data.append((y_idx, x_idx, center))
+            else:
+                # Calculate intersection area for partial overlap
+                intersection = polygon.intersection(crop_box)
+                intersection_area = intersection.area
+                
+                # Use strict > comparison to avoid floating point issues
+                if intersection_area / crop_area > threshold - 1e-9:
+                    valid_crops_data.append((y_idx, x_idx, center))
     
     # If we have fewer valid crops than requested, return all of them
     if len(valid_crops_data) <= n_crops:
