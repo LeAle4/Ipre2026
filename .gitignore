@@ -2,6 +2,7 @@ data/
 dataset/test_geos/
 dataset/crops_test/
 dataset/output/
+Tests/2D test/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
