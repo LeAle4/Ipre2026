@@ -2,13 +2,18 @@
 Comprehensive geoglyph image analysis test suite.
 
 This script orchestrates the computation of spatial and textural metrics
-(Moran's I, Entropy, GLCM Contrast) on geoglyph images from a specified area,
-and generates visualizations (histograms, 2D/3D scatter plots) with results
-saved to a user-specified output directory.
+(Moran's I, Entropy, GLCM Contrast, GLCM Homogeneity) on geoglyph images from 
+a specified area, and generates visualizations (histograms, 2D/3D scatter plots) 
+with results saved to a user-specified output directory.
+
+The code is designed to be easily extensible: simply add new metrics to the 
+METHOD_REGISTRY and they will automatically be available for analysis and 
+visualization.
 
 Usage:
     python repr_test.py --area lluta --methods moran entropy contrast --output ./results
-    python repr_test.py --area chugchug --methods moran --output ./my_results
+    python repr_test.py --area chugchug --methods homogeneity --output ./my_results
+    python repr_test.py --area unita --methods moran entropy contrast homogeneity --output ./results
 """
 
 import argparse
@@ -17,7 +22,8 @@ import pandas as pd
 from pathlib import Path
 from PIL import Image
 import numpy as np
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Callable
+from itertools import combinations
 
 # Import our custom modules
 from methods import morans_i, spatial_entropy, compute_glcm_contrast, compute_glcm_homogeneity
@@ -27,6 +33,41 @@ from visualize import (
     plot_2d_scatter,
     plot_3d_scatter
 )
+
+# ============================================================================
+# METHOD REGISTRY: Central configuration for all available metrics
+# ============================================================================
+# Add new metrics here without modifying other parts of the code
+METHOD_REGISTRY = {
+    'moran': {
+        'name': "Moran's I",
+        'description': "Spatial Autocorrelation Index",
+        'unit': "Moran's I",
+        'compute_func': lambda img_df: morans_i(img_df, adjacency="rook", wrap=False, nan_policy="omit"),
+        'input_type': 'dataframe',  # 'dataframe' or 'array'
+    },
+    'entropy': {
+        'name': "Spatial Entropy",
+        'description': "Information Entropy",
+        'unit': "Entropy (bits)",
+        'compute_func': lambda img_df: spatial_entropy(img_df, adjacency="rook", wrap=False, nan_policy="omit"),
+        'input_type': 'dataframe',
+    },
+    'contrast': {
+        'name': "GLCM Contrast",
+        'description': "Gray Level Co-occurrence Matrix Contrast",
+        'unit': "GLCM Contrast",
+        'compute_func': lambda img_arr: compute_glcm_contrast(img_arr, distances=[1], angles=[0], levels=256),
+        'input_type': 'array',
+    },
+    'homogeneity': {
+        'name': "GLCM Homogeneity",
+        'description': "Gray Level Co-occurrence Matrix Homogeneity",
+        'unit': "GLCM Homogeneity",
+        'compute_func': lambda img_arr: compute_glcm_homogeneity(img_arr, distances=[1], angles=[0], levels=256),
+        'input_type': 'array',
+    },
+}
 
 
 class GeoglyphAnalyzer:
@@ -86,11 +127,14 @@ class GeoglyphAnalyzer:
     
     def compute_metrics(self, image_array: np.ndarray, methods: List[str]) -> Dict[str, float]:
         """
-        Compute requested metrics for an image.
+        Compute requested metrics for an image using the METHOD_REGISTRY.
+        
+        This method is automatically extensible: any method in METHOD_REGISTRY
+        will work without requiring code changes here.
         
         Args:
             image_array: Grayscale numpy array.
-            methods: List of method names ('moran', 'entropy', 'contrast', 'homogeneity').
+            methods: List of method names (must exist in METHOD_REGISTRY).
         
         Returns:
             Dictionary of {method: value}.
@@ -98,17 +142,24 @@ class GeoglyphAnalyzer:
         metrics = {}
         img_df = pd.DataFrame(image_array)
         
-        if 'moran' in methods:
-            metrics['moran'] = morans_i(img_df, adjacency="rook", wrap=False, nan_policy="omit")
-        
-        if 'entropy' in methods:
-            metrics['entropy'] = spatial_entropy(img_df, adjacency="rook", wrap=False, nan_policy="omit")
-        
-        if 'contrast' in methods:
-            metrics['contrast'] = compute_glcm_contrast(image_array, distances=[1], angles=[0], levels=256)
-        
-        if 'homogeneity' in methods:
-            metrics['homogeneity'] = compute_glcm_homogeneity(image_array, distances=[1], angles=[0], levels=256)
+        for method in methods:
+            if method not in METHOD_REGISTRY:
+                print(f"Warning: Unknown method '{method}', skipping.")
+                continue
+            
+            registry_entry = METHOD_REGISTRY[method]
+            input_type = registry_entry.get('input_type', 'array')
+            compute_func = registry_entry['compute_func']
+            
+            try:
+                if input_type == 'dataframe':
+                    metrics[method] = compute_func(img_df)
+                elif input_type == 'array':
+                    metrics[method] = compute_func(image_array)
+                else:
+                    print(f"Warning: Unknown input type '{input_type}' for method '{method}'.")
+            except Exception as e:
+                print(f"Error computing metric '{method}': {e}")
         
         return metrics
     
@@ -164,24 +215,34 @@ class GeoglyphAnalyzer:
         """
         Generate visualizations based on available metrics.
         
+        This method is fully generic and works with any combination of methods
+        from METHOD_REGISTRY. It automatically generates:
+        - 1D histograms and boxplots for each metric
+        - 2D scatter plots for all pairwise metric combinations
+        - 3D scatter plots when 3+ metrics are available
+        
         Args:
             df_results: DataFrame with computed metrics.
-            methods: List of method names computed.
+            methods: List of method names that were computed.
         """
-        # Define metric properties (column_name, display_name, unit_label)
-        metric_props = {
-            'moran': ("moran", "Moran's I", "Moran's I"),
-            'entropy': ("entropy", "Spatial Entropy", "Entropy (bits)"),
-            'contrast': ("contrast", "GLCM Contrast", "GLCM Contrast"),
-            'homogeneity': ("homogeneity", "GLCM Homogeneity", "GLCM Homogeneity")
-        }
+        # Validate all methods exist in registry
+        valid_methods = [m for m in methods if m in METHOD_REGISTRY]
+        if not valid_methods:
+            print("Warning: No valid methods to visualize.")
+            return
+        
+        if len(valid_methods) < len(methods):
+            invalid = set(methods) - set(valid_methods)
+            print(f"Warning: Skipping invalid methods: {invalid}")
+        
+        print(f"\nGenerating visualizations for methods: {', '.join(valid_methods)}")
         
         # 1D plots: histogram and boxplot for each metric
-        for method in methods:
-            if method not in metric_props:
-                continue
-            
-            col_name, display_name, unit = metric_props[method]
+        for method in valid_methods:
+            registry_entry = METHOD_REGISTRY[method]
+            col_name = method
+            display_name = registry_entry['name']
+            unit = registry_entry['unit']
             
             # Histogram
             hist_path = self.output_dir / f"{self.area_name}_{method}_histogram.png"
@@ -197,41 +258,36 @@ class GeoglyphAnalyzer:
                 f"{display_name} by Class", unit, str(box_path)
             )
         
-        # 2D scatter plots: pairwise combinations
-        if len(methods) >= 2:
-            method_pairs = [
-                ('moran', 'entropy'),
-                ('moran', 'contrast'),
-                ('moran', 'homogeneity'),
-                ('entropy', 'contrast'),
-                ('entropy', 'homogeneity'),
-                ('contrast', 'homogeneity')
-            ]
+        # 2D scatter plots: all pairwise combinations
+        if len(valid_methods) >= 2:
+            method_pairs = list(combinations(valid_methods, 2))
             
             for m1, m2 in method_pairs:
-                if m1 not in methods or m2 not in methods:
-                    continue
-                
-                props1 = metric_props[m1]
-                props2 = metric_props[m2]
+                props1 = METHOD_REGISTRY[m1]
+                props2 = METHOD_REGISTRY[m2]
                 
                 scatter_path = self.output_dir / f"{self.area_name}_{m1}_vs_{m2}_scatter.png"
                 plot_2d_scatter(
-                    df_results, props1[0], props2[0],
+                    df_results, m1, m2,
                     self.area_name, self.target_size,
-                    f"{props1[1]} vs {props2[1]}",
-                    props1[2], props2[2],
+                    f"{props1['name']} vs {props2['name']}",
+                    props1['unit'], props2['unit'],
                     str(scatter_path)
                 )
         
-        # 3D scatter plot: all three metrics if available
-        if len(methods) >= 3 and all(m in methods for m in ['moran', 'entropy', 'contrast', 'homogeneity']):
+        # 3D scatter plot: use first 3 metrics if available
+        if len(valid_methods) >= 3:
+            m1, m2, m3 = valid_methods[0], valid_methods[1], valid_methods[2]
+            props1 = METHOD_REGISTRY[m1]
+            props2 = METHOD_REGISTRY[m2]
+            props3 = METHOD_REGISTRY[m3]
+            
             scatter_3d_path = self.output_dir / f"{self.area_name}_3d_scatter.png"
             plot_3d_scatter(
-                df_results, "entropy", "moran", "contrast",
+                df_results, m1, m2, m3,
                 self.area_name, self.target_size,
                 "3D Feature Space",
-                "Entropy (bits)", "Moran's I", "GLCM Contrast",
+                props1['unit'], props2['unit'], props3['unit'],
                 str(scatter_3d_path)
             )
     
@@ -290,7 +346,7 @@ Examples:
         "--methods",
         type=str,
         nargs='+',
-        choices=['moran', 'entropy', 'contrast', 'homogeneity'],
+        choices=list(METHOD_REGISTRY.keys()),
         required=True,
         help="Methods to compute (can specify multiple)"
     )
@@ -313,8 +369,8 @@ Examples:
     args = parser.parse_args()
     target_size = tuple(args.size)
     
-    # Validate methods
-    valid_methods = {'moran', 'entropy', 'contrast', 'homogeneity'}
+    # Validate methods (automatically uses all keys from METHOD_REGISTRY)
+    valid_methods = set(METHOD_REGISTRY.keys())
     requested_methods = set(args.methods)
     if not requested_methods.issubset(valid_methods):
         parser.error(f"Invalid methods: {requested_methods - valid_methods}")
