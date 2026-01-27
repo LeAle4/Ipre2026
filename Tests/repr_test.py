@@ -225,7 +225,7 @@ class GeoglyphAnalyzer:
                 )
         
         # 3D scatter plot: all three metrics if available
-        if len(methods) >= 3 and all(m in methods for m in ['moran', 'entropy', 'contrast']):
+        if len(methods) >= 3 and all(m in methods for m in ['moran', 'entropy', 'contrast', 'homogeneity']):
             scatter_3d_path = self.output_dir / f"{self.area_name}_3d_scatter.png"
             plot_3d_scatter(
                 df_results, "entropy", "moran", "contrast",

@@ -54,6 +54,7 @@ def plot_1d_histogram(
              ha="right", va="bottom", fontsize=9, color="gray")
     
     plt.tight_layout()
+    plt.show()
     plt.savefig(output_path, dpi=200)
     print(f"Saved histogram to {output_path}")
     plt.close()
@@ -97,6 +98,7 @@ def plot_1d_boxplot(
              ha="right", va="bottom", fontsize=9, color="gray")
     
     plt.tight_layout()
+    plt.show()
     plt.savefig(output_path, dpi=200)
     print(f"Saved boxplot to {output_path}")
     plt.close()
@@ -158,6 +160,7 @@ def plot_2d_scatter(
              ha="right", va="bottom", fontsize=9, color="gray")
     
     plt.tight_layout()
+    plt.show()
     plt.savefig(output_path, dpi=200)
     print(f"Saved 2D scatter plot to {output_path}")
     plt.close()
@@ -225,6 +228,7 @@ def plot_3d_scatter(
              ha="right", va="bottom", fontsize=9, color="gray")
     
     plt.tight_layout()
+    plt.show()
     plt.savefig(output_path, dpi=200)
     print(f"Saved 3D scatter plot to {output_path}")
     plt.close()
