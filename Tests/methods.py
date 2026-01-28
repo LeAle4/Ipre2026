@@ -11,6 +11,7 @@ import pandas as pd
 from libpysal.weights import lat2W
 from esda.moran import Moran
 from skimage.feature import graycomatrix, graycoprops
+from skimage.measure import moments_hu, moments_central
 
 
 def morans_i(image_df, adjacency: str = "rook", wrap: bool = False, nan_policy: str = "omit") -> float:
@@ -254,4 +255,82 @@ def compute_glcm_energy(image_array, distances=[1], angles=[0], levels=256) -> f
     # Extract energy property using graycoprops (first distance and angle only)
     energy = graycoprops(glcm, 'energy')[0, 0]
     return float(energy)
+
+
+def compute_glcm_correlation(image_array, distances=[1], angles=[0], levels=256) -> float:
+    """
+    Compute GLCM (Gray-Level Co-occurrence Matrix) correlation for a grayscale image.
+
+    GLCM correlation measures the linear dependency of gray levels on their neighbors.
+    It indicates how correlated a pixel is to its neighbor over the whole image.
+    High correlation values indicate that the image has strong linear structures,
+    while low values suggest more random patterns.
+
+    Args:
+        image_array: numpy array (H x W) of pixel values (will be cast to uint8).
+        distances: list of pixel pair distance offsets (in pixel units).
+        angles: list of angles in radians (e.g., [0] for horizontal, [0, np.pi/4, np.pi/2, 3*np.pi/4] for all).
+        levels: number of gray levels to quantize the image into (default 256 for 8-bit).
+
+    Returns:
+        GLCM correlation value (float). Range [-1, 1]. Higher values indicate stronger linear relationships.
+    """
+    # Ensure image is uint8 type
+    image = image_array.astype(np.uint8)
+    
+    # Compute GLCM
+    glcm = graycomatrix(
+        image,
+        distances=distances,
+        angles=angles,
+        levels=levels,
+        symmetric=True,
+        normed=True
+    )
+    
+    # Extract correlation property using graycoprops (first distance and angle only)
+    correlation = graycoprops(glcm, 'correlation')[0, 0]
+    return float(correlation)
+
+
+def compute_hu_moments(image_array) -> float:
+    """
+    Compute Hu moments (shape descriptors) for a grayscale image.
+
+    Hu moments are 7 shape-based invariant moments that are invariant to translation,
+    rotation, and scale. They are useful for shape analysis and object recognition.
+    This function returns the first Hu moment (hu[0]), which is the most stable and
+    representative shape descriptor. It's invariant to rotation, scale, and translation.
+
+    The 7 individual Hu moments capture different aspects of shape:
+    - hu[0]: Primary shape descriptor (used here) - related to object area & shape
+    - hu[1]: Related to object elongation
+    - hu[2-4]: Related to shape asymmetry and boundaries
+    - hu[5-6]: Related to complex shape details
+
+    Args:
+        image_array: numpy array (H x W) of pixel values (grayscale image).
+
+    Returns:
+        First Hu moment (hu[0]) as float. This is the primary shape descriptor.
+        Returns the log of absolute value to handle potentially large or very small values.
+        Higher values indicate more complex/irregular shapes.
+    """
+    # Convert to float array
+    image = image_array.astype(float)
+    
+    # Compute central moments
+    mu = moments_central(image)
+    
+    # Compute Hu moments (returns 7 values)
+    hu = moments_hu(mu)
+    
+    # Return the first Hu moment (most significant and stable)
+    # Use log of absolute value to normalize scale and handle extreme values
+    hu_first = float(hu[0])
+    
+    # Add small epsilon to avoid log(0) and take log to normalize scale
+    hu_log = float(np.log10(np.abs(hu_first) + 1e-10))
+    
+    return hu_log
 

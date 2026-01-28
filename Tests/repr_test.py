@@ -26,7 +26,7 @@ from typing import Dict, List, Tuple, Callable
 from itertools import combinations
 
 # Import our custom modules
-from methods import morans_i, spatial_entropy, compute_glcm_contrast, compute_glcm_homogeneity, compute_glcm_energy
+from methods import morans_i, spatial_entropy, compute_glcm_contrast, compute_glcm_homogeneity, compute_glcm_energy, compute_glcm_correlation, compute_hu_moments
 from visualize import (
     plot_1d_histogram,
     plot_1d_boxplot,
@@ -72,6 +72,20 @@ METHOD_REGISTRY = {
         'description': "Gray Level Co-occurrence Matrix Energy (Angular Second Moment)",
         'unit': "GLCM Energy",
         'compute_func': lambda img_arr: compute_glcm_energy(img_arr, distances=[1], angles=[0], levels=256),
+        'input_type': 'array',
+    },
+    'correlation': {
+        'name': "GLCM Correlation",
+        'description': "Gray Level Co-occurrence Matrix Correlation",
+        'unit': "GLCM Correlation",
+        'compute_func': lambda img_arr: compute_glcm_correlation(img_arr, distances=[1], angles=[0], levels=256),
+        'input_type': 'array',
+    },
+    'humoments': {
+        'name': "Hu Moments (Shape Descriptor)",
+        'description': "Shape-based invariant moments (L2 norm of 7 Hu moments)",
+        'unit': "Hu Moments Norm",
+        'compute_func': lambda img_arr: compute_hu_moments(img_arr),
         'input_type': 'array',
     },
 }
