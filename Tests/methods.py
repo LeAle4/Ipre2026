@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from libpysal.weights import lat2W
 from esda.moran import Moran
-from skimage.feature import graycomatrix, graycoprops
+from skimage.feature import graycomatrix, graycoprops, hog
 from skimage.measure import moments_hu, moments_central
 
 
@@ -334,3 +334,39 @@ def compute_hu_moments(image_array) -> float:
     
     return hu_log
 
+
+def hog_energy(image,
+               pixels_per_cell=(16, 16),
+               cells_per_block=(1, 1),
+               orientations=9):
+    """
+    Compute HOG (Histogram of Oriented Gradients) energy for a grayscale image.
+    
+    HOG energy measures the overall gradient magnitude and directionality in an image.
+    Higher values indicate stronger edges and more pronounced directional patterns,
+    which can be useful for detecting structured features in geoglyphs.
+    
+    Args:
+        image: 2D grayscale image (numpy array)
+        pixels_per_cell: tuple (y, x) specifying the size of each cell in pixels.
+                        Default (16, 16).
+        cells_per_block: tuple (y, x) specifying number of cells per block for normalization.
+                        Default (1, 1) means no block normalization beyond individual cells.
+        orientations: Number of orientation bins for the HOG descriptor. Default 9.
+    
+    Returns:
+        scalar HOG energy (float): Mean squared magnitude of the HOG feature vector.
+                                  Higher values indicate stronger gradient patterns.
+    """
+    hog_vec = hog(
+        image,
+        orientations=orientations,
+        pixels_per_cell=pixels_per_cell,
+        cells_per_block=cells_per_block,
+        block_norm='L2-Hys',
+        visualize=False,
+        feature_vector=True
+    )
+
+    energy = np.mean(hog_vec ** 2)
+    return energy
