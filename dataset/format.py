@@ -1,7 +1,16 @@
+"""
+Image formatting and cropping module for geoglyph dataset processing.
+
+This module provides utilities for cropping images with various strategies
+(random, fixed grid, polygon-based) and filling out-of-bounds regions with noise.
+Key functions support generating training data from geoglyph imagery.
+"""
+
 import shapely
 from pathlib import Path
 import numpy as np
 import cv2
+import json
 
 from handle import (
     BASE_DIR,
@@ -17,6 +26,158 @@ OUTPUT_DIR = BASE_DIR / "crops_output"
 RAND_CROPS_DIR = OUTPUT_DIR / "random_crops"
 FIXED_CROPS_DIR = OUTPUT_DIR / "fixed_crops"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# ============================================================================
+# Utility Functions
+# ============================================================================
+
+def extract_area_from_filename(filename: str) -> str:
+    """
+    Extract area name from a geoglyph filename.
+    
+    Recognizes standard naming conventions:
+    - Files starting with 'unita_' -> 'unita'
+    - Files starting with 'lluta_' -> 'lluta'
+    - Files starting with 'chugchug_' or 'chug_' -> 'chugchug'
+    - Files starting with 'granllama_' -> 'granllama'
+    - Files starting with 'salvador_' -> 'salvador'
+    
+    Args:
+        filename: Name of the file (not full path)
+    
+    Returns:
+        Area name ('unita', 'lluta', 'chugchug', 'granllama', 'salvador') or 'unknown' if not recognized
+    """
+    name = filename.lower()
+    if name.startswith('unita_'):
+        return 'unita'
+    elif name.startswith('lluta_'):
+        return 'lluta'
+    elif name.startswith('chugchug_') or name.startswith('chug_'):
+        return 'chugchug'
+    elif name.startswith('granllama_'):
+        return 'granllama'
+    elif name.startswith('salvador_'):
+        return 'salvador'
+    return 'unknown'
+
+
+def load_polygon_from_metadata(json_path):
+    """
+    Load polygon vertices from metadata JSON file.
+    
+    Expects JSON format with 'polygon_points', 'polygon' or 'geometry' field containing coordinates.
+    
+    Args:
+        json_path: Path to the metadata JSON file
+    
+    Returns:
+        List of (x, y) tuples representing polygon vertices, or None if not found
+    """
+    try:
+        with open(json_path, 'r') as f:
+            metadata = json.load(f)
+        
+        # Try different possible keys for polygon data
+        if 'polygon_points' in metadata:
+            polygon_points = metadata['polygon_points']
+            if polygon_points and isinstance(polygon_points, list) and 'exterior' in polygon_points[0]:
+                coords = polygon_points[0]['exterior']
+            else:
+                coords = polygon_points
+        elif 'polygon' in metadata:
+            coords = metadata['polygon']
+        elif 'geometry' in metadata:
+            geom = metadata['geometry']
+            if isinstance(geom, dict) and 'coordinates' in geom:
+                coords = geom['coordinates']
+                # Handle nested coordinate arrays (e.g., from GeoJSON)
+                if coords and isinstance(coords[0], (list, tuple)) and isinstance(coords[0][0], (list, tuple)):
+                    coords = coords[0]
+            else:
+                coords = geom
+        elif 'coordinates' in metadata:
+            coords = metadata['coordinates']
+        else:
+            return None
+        
+        # Convert to list of tuples if needed
+        if isinstance(coords, list):
+            polygon_vertices = [(float(x), float(y)) for x, y in coords]
+        else:
+            polygon_vertices = coords
+        
+        return polygon_vertices
+    
+    except Exception as e:
+        return None
+
+
+def find_metadata_file(image_path):
+    """
+    Find the corresponding metadata JSON file for an image.
+    
+    Args:
+        image_path: Path to the image file (.jpg or .tif)
+    
+    Returns:
+        Path to metadata file or None if not found
+    """
+    # Extract the stem and look for metadata file
+    # E.g., unita_geoglif_0000_ortho.jpg -> unita_geoglif_0000_metadata.json
+    stem = image_path.stem.replace('_ortho', '')
+    json_path = image_path.parent / f"{stem}_metadata.json"
+    
+    return json_path if json_path.exists() else None
+
+
+def geo_to_pixel(lon, lat, bounds, img_shape):
+    """
+    Convert geographic coordinates to pixel coordinates.
+    
+    Args:
+        lon: Longitude (x) coordinate
+        lat: Latitude (y) coordinate
+        bounds: Dict with 'minx', 'miny', 'maxx', 'maxy' keys defining geographic bounds
+        img_shape: Dict with 'width' and 'height' keys defining image dimensions
+    
+    Returns:
+        Tuple of (x_pixel, y_pixel) coordinates
+    """
+    geo_minx, geo_miny = bounds['minx'], bounds['miny']
+    geo_maxx, geo_maxy = bounds['maxx'], bounds['maxy']
+    img_width, img_height = img_shape['width'], img_shape['height']
+    
+    # Normalize to [0, 1]
+    x_norm = (lon - geo_minx) / (geo_maxx - geo_minx)
+    y_norm = (geo_maxy - lat) / (geo_maxy - geo_miny)  # Invert Y axis
+    
+    # Convert to pixel coordinates
+    x_pixel = x_norm * img_width
+    y_pixel = y_norm * img_height
+    
+    return (x_pixel, y_pixel)
+
+
+def convert_polygon_geo_to_pixel(polygon_vertices, bounds, img_shape):
+    """
+    Convert a list of geographic polygon vertices to pixel coordinates.
+    
+    Args:
+        polygon_vertices: List of (lon, lat) tuples in geographic coordinates
+        bounds: Dict with 'minx', 'miny', 'maxx', 'maxy' keys defining geographic bounds
+        img_shape: Dict with 'width' and 'height' keys defining image dimensions
+    
+    Returns:
+        List of (x, y) tuples in pixel coordinates
+    """
+    return [geo_to_pixel(lon, lat, bounds, img_shape) for lon, lat in polygon_vertices]
+
+
+# ============================================================================
+# Noise Filling
+# ============================================================================
 
 def fill_with_noise(image, mask, noise_level=0.1, noise_type='gaussian', seed=None):
     """
@@ -84,6 +245,11 @@ def fill_with_noise(image, mask, noise_level=0.1, noise_type='gaussian', seed=No
     
     return result.astype(image.dtype)
 
+
+# ============================================================================
+# Image Cropping
+# ============================================================================
+
 def crop_image(image, center, window_size):
     """
     Crop an image around a specified center with given window size.
@@ -123,6 +289,11 @@ def crop_image(image, center, window_size):
     
     return crop, mask
 
+
+# ============================================================================
+# Random Crops
+# ============================================================================
+
 def make_random_crops(image, window_size, n_crops, seed=None):
     """
     Generate random crops from an image.
@@ -151,6 +322,11 @@ def make_random_crops(image, window_size, n_crops, seed=None):
         crops.append((crop, mask))
     
     return crops
+
+
+# ============================================================================
+# Fixed Grid Crops
+# ============================================================================
 
 def make_fixed_crops(image, window_size, n_crops, stride=None):
     """
@@ -214,6 +390,11 @@ def make_fixed_crops(image, window_size, n_crops, stride=None):
         crops.append((crop, mask))
 
     return crops
+
+
+# ============================================================================
+# Polygon-based Crops
+# ============================================================================
 
 def make_polygon_thresholds_crops(image, polygon_vertices, window_size, n_crops, stride, threshold=0.1):
     """
@@ -321,6 +502,11 @@ def make_polygon_thresholds_crops(image, polygon_vertices, window_size, n_crops,
         crops.append((crop, mask))
     
     return crops
+
+
+# ============================================================================
+# Negative Sample Generation
+# ============================================================================
 
 def create_negative_samples(area, n_samples, window_size, positive_polygon_coords, seed=None):
     pass
