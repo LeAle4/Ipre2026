@@ -1,7 +1,11 @@
-data/
-dataset/test_geos/
-dataset/crops_test/
-dataset/output/
+#Raw files that weight too much to be uploaded to GitHub
+data/chugchug_raw
+data/lluta_raw
+data/unita_raw
+data/salvador_raw
+data/granllama_raw
+
+#Python cache files
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
