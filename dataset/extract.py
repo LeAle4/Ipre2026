@@ -11,6 +11,7 @@ For each polygon, creates:
 import argparse
 from pathlib import Path
 import json
+import sys
 import geopandas as gpd
 import rasterio
 from rasterio.windows import Window
@@ -19,10 +20,12 @@ import numpy as np
 from shapely.geometry import MultiPolygon, Polygon
 from pyproj import Geod
 
-# Default input files
-DEFAULT_LAYERS_FILE = Path("./data/ML_labeling_UNITA.gpkg")
-DEFAULT_ORTHO_TIF = Path("./data/CerroUnita_ortomosaico.tif")
-DEFAULT_OUTPUT_DIR = Path("extracted_geoglifs")
+# Add parent directory to path to import utils
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils import CLASSES, CLASS_IDS
+
+# Create reverse mapping for class names
+CLASS_NAMES = {v: k for k, v in CLASSES.items()}
 
 def calculate_bbox_size_meters(bounds, crs):
     """
@@ -361,22 +364,22 @@ Examples:
     parser.add_argument(
         '--layers',
         type=Path,
-        default=DEFAULT_LAYERS_FILE,
-        help=f'Path to the geopackage file containing polygons (default: {DEFAULT_LAYERS_FILE})'
+        required=True,
+        help='Path to the geopackage file containing polygons'
     )
 
     parser.add_argument(
         '--ortho',
         type=Path,
-        default=DEFAULT_ORTHO_TIF,
-        help=f'Path to the orthomosaic TIF file (default: {DEFAULT_ORTHO_TIF})'
+        required=True,
+        help='Path to the orthomosaic TIF file'
     )
 
     parser.add_argument(
         '--output',
         type=Path,
-        default=DEFAULT_OUTPUT_DIR,
-        help=f'Output directory for extracted images (default: {DEFAULT_OUTPUT_DIR})'
+        required=True,
+        help='Output directory for extracted images'
     )
 
     parser.add_argument(
@@ -390,8 +393,8 @@ Examples:
         '--class-filter',
         type=int,
         default=None,
-        choices=[1, 2, 3],
-        help='Filter to process only polygons of a specific class (1=geo, 2=ground, 3=road). Default: process all classes'
+        choices=CLASS_IDS,
+        help=f'Filter to process only polygons of a specific class ({", ".join(f"{v}={k}" for k, v in CLASSES.items())}). Default: process all classes'
     )
 
     return parser.parse_args()
@@ -426,15 +429,14 @@ def main():
 
     # Process each polygon
     all_metadata = []
-    class_names = {1: 'geo', 2: 'ground', 3: 'road'}
     skipped_count = 0
     
     if args.class_filter is not None:
-        print(f"\nFiltering to class {args.class_filter} ({class_names.get(args.class_filter, 'unknown')}) only\n")
+        print(f"\nFiltering to class {args.class_filter} ({CLASS_NAMES.get(args.class_filter, 'unknown')}) only\n")
     
     for idx, row in gdf.iterrows():
         polygon_class = row['class']
-        class_name = class_names.get(polygon_class, 'unknown')
+        class_name = CLASS_NAMES.get(polygon_class, 'unknown')
         
         # Skip if class filter is set and polygon doesn't match
         if args.class_filter is not None and polygon_class != args.class_filter:
