@@ -7,21 +7,23 @@ For each polygon, creates:
 - Ortho image with polygon overlay (JPEG)
 - Bounding box size in meters
 """
-
-import argparse
-from pathlib import Path
 import json
 import sys
+import argparse
+from pathlib import Path
+
 import geopandas as gpd
 import rasterio
-from rasterio.windows import Window
-import matplotlib.pyplot as plt
 import numpy as np
-from shapely.geometry import MultiPolygon, Polygon
-from pyproj import Geod
+import matplotlib.pyplot as plt
+from rasterio.windows import Window
+from shapely.geometry import MultiPolygon, Polygon, Point
+from shapely.ops import transform
+from pyproj import Geod,Transformer
 
 # Add parent directory to path to import utils
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+UTLS_PATH = Path(__file__).resolve().parent.parent
+sys.path.append(str(UTLS_PATH))
 from utils import CLASSES, CLASS_IDS
 
 # Create reverse mapping for class names
@@ -38,7 +40,6 @@ def calculate_bbox_size_meters(bounds, crs):
     Returns:
         dict with width_m, height_m, area_m2
     """
-    from shapely.geometry import Point
     
     minx, miny, maxx, maxy = bounds
 
@@ -54,8 +55,6 @@ def calculate_bbox_size_meters(bounds, crs):
         p3 = Point(minx, maxy)
         
         # Project to WGS84
-        from shapely.ops import transform
-        from pyproj import Transformer
         
         transformer = Transformer.from_crs(proj_crs, wgs84_crs, always_xy=True)
         
