@@ -5,6 +5,10 @@ data/unita_raw
 data/salvador_raw
 data/granllama_raw
 
+data/chugchug_polygons
+data/lluta_polygons
+data/unita_polygons
+
 #Python cache files
 __pycache__/
 *.pyc
