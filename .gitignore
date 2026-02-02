@@ -9,6 +9,12 @@ data/chugchug_polygons
 data/lluta_polygons
 data/unita_polygons
 
+data/unita_resized
+data/chugchug_resized
+data/lluta_resized
+
+data/polygon_data
+
 #Python cache files
 __pycache__/
 *.pyc
