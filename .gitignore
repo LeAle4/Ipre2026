@@ -13,6 +13,10 @@ data/unita_resized
 data/chugchug_resized
 data/lluta_resized
 
+data/unita_crops
+data/chugchug_crops
+data/lluta_crops
+
 data/polygon_data
 
 #Python cache files

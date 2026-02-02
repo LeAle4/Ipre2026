@@ -26,7 +26,7 @@ The toolkit enables extraction of image crops from orthomosaic TIFs based on lab
 ├── dataset/                   # Dataset processing tools
 │   ├── extract.py            # Main extraction script (see below)
 │   ├── crop.py               # (Placeholder for cropping utilities)
-│   └── resize.py             # (Placeholder for resizing utilities)
+│   └── resize.py             # Batch polygon resizing tool (see below)
 │
 ├── visualization/             # Visualization and analysis tools
 │   ├── viewer.py             # (Placeholder for data viewer)
@@ -129,6 +129,53 @@ output_directory/
 
 ---
 
+### `dataset/resize.py` - Polygon Image Resizing Tool
+
+**Purpose**: Batch resize extracted polygon images to standardized dimensions using advanced interpolation techniques for high-quality downsampling.
+
+**Key Features**:
+- **High-Quality Interpolation**: Uses Lagrange-Chebyshev Interpolation (LCI) algorithm for superior image quality compared to standard methods
+  - References: D. Occorsio, G. Ramella, W. Themistoclakis, "Lagrange-Chebyshev Interpolation for image resizing", Mathematics and Computers in Simulation, 2022
+- **Multi-format Support**: Handles both grayscale and RGB images, including RGBA with automatic alpha channel handling
+- **Study Area-Specific Scaling**: Applies area-specific scale factors defined in configuration
+- **Batch Processing**: Resize all geoglyphs for multiple study areas in a single command
+- **Metadata Management**: Automatically updates and saves polygon metadata with resized image references
+- **Output Organization**: Saves resized images in area-specific directories with consistent naming
+
+**Algorithm Details**:
+The LCI method uses Chebyshev polynomial approximation in the frequency domain (via IDCT transforms) to achieve superior quality compared to bilinear or bicubic interpolation, particularly effective for downsampling with minimal artifacts.
+
+**Command-line Interface**:
+```bash
+# Resize polygons for a single area
+python dataset/resize.py --area unita
+
+# Resize polygons for multiple areas
+python dataset/resize.py --area unita chugchug lluta
+
+# Resize for ChugChug area only
+python dataset/resize.py --area chugchug
+```
+
+**Output Structure**:
+```
+data/{area}_resized/
+├── unita_class1_0_resized.png
+├── unita_class1_1_resized.png
+├── unita_class1_2_resized.png
+└── ...
+```
+
+**Metadata Updates**:
+The script automatically updates the metadata stored in `data/polygon_data/` for each resized polygon, including:
+- Resized image path
+- New image dimensions
+- Timestamp of resizing operation
+
+**Why it's useful**: Standardizes polygon image sizes for machine learning training, reduces storage requirements without significant quality loss, and maintains proper metadata linkage between original and processed images.
+
+---
+
 ### `visualization/data_properties.py`
 
 **Purpose**: Utility functions for analyzing spatial resolution of geo-referenced TIF files.
@@ -200,7 +247,13 @@ python dataset/extract.py \
   --output data/unita_polygons
 ```
 
-### 2. Data Access
+### 2. Data Resizing
+Standardize polygon image dimensions using high-quality interpolation:
+```bash
+python dataset/resize.py --area unita chugchug lluta
+```
+
+### 3. Data Access
 Load and work with extracted polygons:
 ```python
 from utils import get_polygons
@@ -223,7 +276,6 @@ for poly in polygons:
 
 The following components are placeholders for future functionality:
 - `dataset/crop.py` - Advanced cropping utilities
-- `dataset/resize.py` - Batch resizing operations
 - `visualization/viewer.py` - Interactive data viewer
 - Expand `visualization/data_properties.py` - Dataset statistics and quality checks
 
