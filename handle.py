@@ -59,6 +59,7 @@ SCALES = {'unita': 0.886, 'lluta': 0.218, 'chugchug': 0.18}
 WINDOW_SIZE = 224
 STRIDE = int(WINDOW_SIZE / 2)
 THRESHOLD_CROP_CONTENT = 0.8  # Minimum fraction of geoglyph pixels in a crop to be considered valid
+NEGATIVES_RATIO = 3 # Number of negative samples per positive sample
 
 def get_area_tif(area:str) -> Path:
     """Get the path to the orthomosaic GeoTIFF for the specified study area.
