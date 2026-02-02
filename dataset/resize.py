@@ -7,10 +7,10 @@ from scipy.fft import idct
 from pathlib import Path
 
 # Add parent directory to path to import utils
-UTLS_PATH = Path(__file__).resolve().parent.parent
-sys.path.append(str(UTLS_PATH))
+UTILS_PATH = Path(__file__).resolve().parent.parent
+sys.path.append(str(UTILS_PATH))
 
-from utils import PATHS, SCALES, Polygon, get_geos_from_summary, load_img_array_from_path, POLYGON_DATA_DIR, tabbed, title
+from utils import PATHS, SCALES, Polygon, get_geos_from_summary, load_img_array_from_path, POLYGON_DATA_DIR, tabbed, title, make_resized_path
 
 def lci(I_in, *args):
     """
@@ -125,16 +125,6 @@ def save_resized_polygon(geo:Polygon, resized_array:np.ndarray, save_path:Path) 
     geo.resized_path = save_path
     geo.save_metadata(POLYGON_DATA_DIR / f"{geo.area}_class{geo.class_id}_{geo.id}_metadata.json")
     img.save(save_path)
-
-def make_resized_path(geo:Polygon, area:str) -> Path:
-    """Construct the path for the resized polygon image.
-    
-    Args:
-        geo: Polygon object.
-    """
-    resized_dir = PATHS[area]["resized"]
-    resized_dir.mkdir(parents=True, exist_ok=True)
-    return resized_dir / f"{geo.area}_class{geo.class_id}_{geo.id}_resized.png"
 
 """Code for use in the command line to resize polygon images to a standard size."""
 def parse_arguments():
