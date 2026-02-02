@@ -17,23 +17,27 @@ from handle import WINDOW_SIZE, STRIDE, THRESHOLD_CROP_CONTENT, geos_from_polygo
 from text import title, tabbed
 from utils import Polygon, pixels_to_coordinates
 
-def valid_crop(geo:Polygon, crop_array:np.ndarray, crop_borders:tuple[float,float,float,float] ,threshold:float=THRESHOLD_CROP_CONTENT) -> bool:
+def calculate_crop_proportion(geo:Polygon, crop_borders:tuple[float,float,float,float]) -> float:
+    """Calculate the proportion of polygon area inside the crop.
+    Args:
+        geo: Polygon object containing the mask path.
+        crop_borders: Tuple of (minx, miny, maxx, maxy) borders of the crop in geographic coordinates.
+    Returns:
+        Proportion of crop area covered by polygon (0.0 to 1.0).
+    """
+    crop_polygon = box(*crop_borders)
+    intersection = crop_polygon.intersection(geo.polygon)
+    crop_area = crop_polygon.area
+    return intersection.area / crop_area
+
+def valid_crop(geo:Polygon, crop_borders:tuple[float,float,float,float], threshold:float=THRESHOLD_CROP_CONTENT) -> bool:
     """Determine if a crop contains sufficient geoglyph content to be considered valid.
     Args:
         geo: Polygon object containing the mask path.
-        crop_array: Crop image as a NumPy array.
         crop_borders: Tuple of (minx, miny, maxx, maxy) borders of the crop in geographic coordinates.
         threshold: Minimum fraction of geoglyph pixels in the crop to be considered valid.
     """
-    crop_polygon = box(*crop_borders)
-    geo_polygon = geo.polygon
-
-    intersection = crop_polygon.intersection(geo_polygon)
-    geo_area_in_crop = intersection.area
-    crop_area = crop_polygon.area
-    proportion = geo_area_in_crop / crop_area if crop_area > 0 else 0
-    
-    return proportion >= threshold
+    return calculate_crop_proportion(geo, crop_borders) >= threshold
 
 def _calculate_crop_borders(i,j, geo:Polygon, window_size:int, stride: int) -> tuple[float,float,float,float]:
     """Calculate the borders of a crop in the original image coordinates.
@@ -77,7 +81,7 @@ def pad_to_window_size(img_array:np.ndarray, window_size:int) -> np.ndarray:
     return padded_array
 
 def make_crops(geo:Polygon, img_array:np.ndarray, crop_size:int, stride:int) -> Generator[np.ndarray, None, None]:
-    """Generate crops from the input image array.
+    """Generate crops from the input image array. Guarantees at least one crop per polygon.
     
     Args:
         img_array: Input image as a NumPy array.
@@ -94,11 +98,27 @@ def make_crops(geo:Polygon, img_array:np.ndarray, crop_size:int, stride:int) -> 
         padded_array = img_array
 
     view = view_as_windows(padded_array, (crop_size, crop_size, padded_array.shape[2]), step=stride)
+
+    crop_count = 0
+    best_crop = None
+    best_proportion = 0.0
+    
     for i in range(view.shape[0]):
         for j in range(view.shape[1]):
             crop_borders = _calculate_crop_borders(i, j, geo, crop_size, stride)
-            if valid_crop(geo, view[i, j, 0], crop_borders) or small:
+            proportion = calculate_crop_proportion(geo, crop_borders)
+            
+            if proportion > best_proportion:
+                best_proportion = proportion
+                best_crop = view[i, j, 0].copy()
+            
+            if proportion >= THRESHOLD_CROP_CONTENT or small:
                 yield view[i, j, 0]
+                crop_count += 1
+    
+    # If no crops were generated, yield the best one we found
+    if crop_count == 0 and best_crop is not None:
+        yield best_crop
 
 def get_polygon_crops(polygon:Polygon, crop_size:int=WINDOW_SIZE, stride:int=STRIDE) -> Generator[np.ndarray, None, None]:
     """Generate crops from the polygon's image.
