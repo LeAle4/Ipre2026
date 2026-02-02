@@ -23,7 +23,7 @@ from PIL import Image, ImageDraw
 # Add parent directory to path to import project helpers
 UTLS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTLS_PATH))
-from handle import CLASSES, CLASS_IDS, POLYGON_DATA_DIR, PATHS
+from handle import CLASSES, CLASS_IDS, POLYGON_DATA_DIR, PATHS, get_area_tif, get_area_labels
 from text import title, tabbed
 from utils import Polygon as PolygonData
 
@@ -209,18 +209,11 @@ def extract_polygon_images(polygon_idx, geometry, gdf_crs, polygon_class, ortho_
 
 def load_area_data(area):
     """Load geopackage and orthomosaic paths for an area."""
-    raw_dir = PATHS[area]["raw"]
+    gpkg_path = get_area_labels(area)
+    ortho_path = get_area_tif(area)
     output_dir = PATHS[area]["polygons"]
     
-    gpkg_files = list(raw_dir.glob("*.gpkg"))
-    tif_files = list(raw_dir.glob("*ortomosaico.tif")) or list(raw_dir.glob("*.tif"))
-    
-    if not gpkg_files:
-        raise FileNotFoundError(f"No .gpkg files found in {raw_dir}")
-    if not tif_files:
-        raise FileNotFoundError(f"No .tif files found in {raw_dir}")
-    
-    return gpkg_files[0], tif_files[0], output_dir
+    return gpkg_path, ortho_path, output_dir
 
 
 def load_geodataframe(gpkg_path, ortho_path, limit=None):

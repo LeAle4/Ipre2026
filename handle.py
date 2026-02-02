@@ -60,6 +60,24 @@ WINDOW_SIZE = 224
 STRIDE = int(WINDOW_SIZE / 2)
 THRESHOLD_CROP_CONTENT = 0.8  # Minimum fraction of geoglyph pixels in a crop to be considered valid
 
+def get_area_tif(area:str) -> Path:
+    """Get the path to the orthomosaic GeoTIFF for the specified study area.
+    
+    Args:
+        area: Name of the study area ('unita', 'chugchug', or 'lluta')."""
+    raw_path = PATHS[area]["raw"]
+    tif_file = raw_path.glob("*ortomosaico.tif")
+    return next(tif_file)
+
+def get_area_labels(area:str) -> Path:
+    """Get the path to the labels GeoJSON for the specified study area.
+    
+    Args:
+        area: Name of the study area ('unita', 'chugchug', or 'lluta')."""
+    raw_path = PATHS[area]["raw"]
+    geojson_file = raw_path.glob("*.gpkg")
+    return next(geojson_file)
+
 def geos_from_polygon_data(area) -> Generator[Polygon, None, None]:
     """Generator yielding Polygon objects from polygon data directory, filtered by area and class.
     Args:
