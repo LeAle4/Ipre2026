@@ -70,32 +70,6 @@ class Polygon:
     Encapsulates all metadata, geometry, and file paths for a polygon.
     """ 
 
-    def load_from_extract_metadata(self, metadata:dict, area:str)-> "Polygon":
-        # Basic properties
-        self.id = metadata["polygon_index"]
-        self.class_id = metadata["class"]
-        self.area = area
-
-        #Image spatial properties
-        self.polygon_points = metadata["polygon_points"][0]["exterior"]
-        self.shape = (metadata["image_shape"]["width"], metadata["image_shape"]["height"], metadata["image_shape"]["channels"])
-        self.size_m = (metadata["bbox_size_meters"]["width_m"], metadata["bbox_size_meters"]["height_m"])
-        self.coords = {"top": metadata["bounds"]["miny"], "left": metadata["bounds"]["minx"],
-                       "bottom": metadata["bounds"]["maxy"], "right": metadata["bounds"]["maxx"]}
-        self.polygon = shapely.geometry.Polygon(self.polygon_points)
-        # File paths: JPEG, TIF, and overlay images
-        paths = _get_path_from_area(area)
-        polygons_path = paths["polygons"]
-
-        self.jpeg_path = polygons_path / metadata["files"]["ortho_jpeg"]
-        self.tif_path = polygons_path / metadata["files"]["ortho_tif"]
-        self.overlay_path = polygons_path / metadata["files"]["overlay_jpeg"]
-        self.resized_path = Path("") 
-        self.crop_paths = []
-        self.augmented_paths = []
-
-        return self
-
     def load_from_metadata(self, path:Path) -> "Polygon":
         """Load polygon metadata from a JSON file.
         
@@ -112,6 +86,7 @@ class Polygon:
         self.shape = tuple(metadata["shape"])
         self.size_m = tuple(metadata["size_m"])
         self.coords = metadata["coords"]
+        self.jpeg_path = Path(metadata["jpeg_path"])
         self.tif_path = Path(metadata["tif_path"])
         self.overlay_path = Path(metadata["overlay_path"])
         self.resized_path = Path(metadata["resized_path"])
@@ -135,6 +110,7 @@ class Polygon:
             "shape": self.shape,
             "size_m": self.size_m,
             "coords": self.coords,
+            "jpeg_path": str(self.jpeg_path),
             "tif_path": str(self.tif_path),
             "overlay_path": str(self.overlay_path),
             "resized_path": str(self.resized_path),
@@ -144,69 +120,6 @@ class Polygon:
 
         with open(save_path, 'w') as f:
             json.dump(metadata, f, indent=4)
-
-def _get_path_from_area(area_name:str) -> dict:
-    """Get path dictionary for a specific study area.
-    
-    Args:
-        area_name: Name of the area ('unita', 'chugchug', or 'lluta')
-        
-    Returns:
-        Dictionary with 'raw', 'polygons', and 'summary' path keys
-    """
-    if area_name == "unita":
-        return UNITA_PATHS
-    elif area_name == "chugchug":
-        return CHUGCHUG_PATHS
-    elif area_name == "lluta":
-        return LLUTA_PATHS
-    else:
-        raise ValueError(f"Unknown area name: {area_name}")
-
-def _parse_polygons_from_summary(area:str) -> Generator[Polygon, None, None]:
-    """Parse all polygons from an area's summary JSON file.
-    
-    Args:
-        area: Name of the area to parse
-        
-    Yields:
-        Polygon objects for each entry in the summary file
-    """
-    summary_path = _get_path_from_area(area)["summary"]
-    with open(summary_path, 'r') as f:
-        summary_data = json.load(f)
-    
-    for polygon in summary_data["polygons"]:
-        poly_obj = Polygon().load_from_extract_metadata(polygon, area)
-        yield poly_obj
-
-
-def get_polygons_from_summary(area_name:str, classes: tuple = CLASS_IDS) -> tuple[Polygon, ...]:
-    """Get polygons from an area, optionally filtered by class.
-    
-    Args:
-        area_name: Name of the area ('unita', 'chugchug', or 'lluta')
-        classes: Tuple of class IDs to include (default: all classes)
-        
-    Returns:
-        Tuple of Polygon objects matching the specified classes
-    """
-    if len(classes)<=3:
-        return tuple(filter(lambda p: p.class_id in classes, _parse_polygons_from_summary(area_name)))
-    else:
-        raise ValueError(f"Classes must be a subset of {CLASS_IDS}, got {classes}")
-
-
-def get_geos_from_summary(area:str):
-    """Get only geoglyph polygons (class 1) from a specific area.
-    
-    Args:
-        area: Name of the area ('unita', 'chugchug', or 'lluta')
-        
-    Returns:
-        Tuple of Polygon objects with class_id=1 (geoglyphs)
-    """
-    return get_polygons_from_summary(area, classes=(CLASSES["geo"],))
 
 def geos_from_polygon_data(area) -> Generator[Polygon, None, None]:
     """Generator yielding Polygon objects from polygon data directory, filtered by area and class.
@@ -259,7 +172,10 @@ def pixels_to_coordinates(polygon:Polygon, pixel_coords:tuple[int, int]) -> tupl
         Tuple of (longitude, latitude) geographic coordinates.
     """
     x_pixel, y_pixel = pixel_coords
-    x_min, y_min, x_max, y_max = polygon.coords.values()
+    x_min = polygon.coords['left']
+    x_max = polygon.coords['right']
+    y_min = polygon.coords['bottom']
+    y_max = polygon.coords['top']
     img_width, img_height = polygon.shape[1], polygon.shape[0]
 
     lon = x_min + (x_pixel / img_width) * (x_max - x_min)

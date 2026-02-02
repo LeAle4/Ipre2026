@@ -10,7 +10,7 @@ from pathlib import Path
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from utils import PATHS, SCALES, Polygon, get_geos_from_summary, load_img_array_from_path, POLYGON_DATA_DIR, tabbed, title, make_resized_path
+from utils import PATHS, SCALES, Polygon, load_img_array_from_path, POLYGON_DATA_DIR, tabbed, title, make_resized_path, geos_from_polygon_data
 
 def lci(I_in, *args):
     """
@@ -146,7 +146,7 @@ if __name__ == "__main__":
     POLYGON_DATA_DIR.mkdir(parents=True, exist_ok=True)
     for area in areas:
         print(title(f"Resizing polygons in area: {area}"))
-        geos = get_geos_from_summary(area)
+        geos = geos_from_polygon_data(area)
         for geo in geos:
             print(f"Resizing polygon ID {geo.id}...")
             resized_array = resize_polygon(geo, scale=SCALES[area])

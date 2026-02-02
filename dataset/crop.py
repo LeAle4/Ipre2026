@@ -82,9 +82,12 @@ def make_crops(geo:Polygon, img_array:np.ndarray, crop_size:int, stride:int) -> 
         crop_size: Size of each square crop.
         stride: Stride for moving the crop window.
     """
+    small = False
     # If the image is smaller than the crop size, we add random noise to the borders so that the image can be passed to the network without resizing
     if img_array.shape[0] < crop_size or img_array.shape[1] < crop_size:
         padded_array = pad_to_window_size(img_array, crop_size)
+        #Crop is small and could bypass threshold, we mark it as such
+        small = True
     else:
         padded_array = img_array
 
@@ -92,7 +95,7 @@ def make_crops(geo:Polygon, img_array:np.ndarray, crop_size:int, stride:int) -> 
     for i in range(view.shape[0]):
         for j in range(view.shape[1]):
             crop_borders = _calculate_crop_borders(i, j, geo, crop_size, stride)
-            if valid_crop(geo, view[i, j, 0], crop_borders):
+            if valid_crop(geo, view[i, j, 0], crop_borders) or small:
                 yield view[i, j, 0]
 
 def get_polygon_crops(polygon:Polygon, crop_size:int=WINDOW_SIZE, stride:int=STRIDE) -> Generator[np.ndarray, None, None]:
