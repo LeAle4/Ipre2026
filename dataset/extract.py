@@ -20,10 +20,12 @@ from shapely.ops import transform
 from pyproj import Geod, Transformer
 from PIL import Image, ImageDraw
 
-# Add parent directory to path to import utils
+# Add parent directory to path to import project helpers
 UTLS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTLS_PATH))
-from utils import CLASSES, CLASS_IDS, Polygon as PolygonData, POLYGON_DATA_DIR, PATHS, title, tabbed
+from handle import CLASSES, CLASS_IDS, POLYGON_DATA_DIR, PATHS
+from text import title, tabbed
+from utils import Polygon as PolygonData
 
 # Create reverse mapping for class names
 CLASS_NAMES = {v: k for k, v in CLASSES.items()}

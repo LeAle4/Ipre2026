@@ -13,7 +13,9 @@ from shapely.geometry import box
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from utils import PATHS, Polygon, load_img_array_from_path, WINDOW_SIZE, STRIDE, geos_from_polygon_data, make_crop_path, title, tabbed, THRESHOLD_CROP_CONTENT, pixels_to_coordinates
+from handle import WINDOW_SIZE, STRIDE, THRESHOLD_CROP_CONTENT, geos_from_polygon_data, make_crop_path, load_img_array_from_path
+from text import title, tabbed
+from utils import Polygon, pixels_to_coordinates
 
 def valid_crop(geo:Polygon, crop_array:np.ndarray, crop_borders:tuple[float,float,float,float] ,threshold:float=THRESHOLD_CROP_CONTENT) -> bool:
     """Determine if a crop contains sufficient geoglyph content to be considered valid.

@@ -6,11 +6,13 @@ from PIL import Image
 from scipy.fft import idct
 from pathlib import Path
 
-# Add parent directory to path to import utils
+# Add parent directory to path to import project helpers
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from utils import PATHS, SCALES, Polygon, load_img_array_from_path, POLYGON_DATA_DIR, tabbed, title, make_resized_path, geos_from_polygon_data
+from handle import SCALES, load_img_array_from_path, POLYGON_DATA_DIR, make_resized_path, geos_from_polygon_data
+from text import title, tabbed
+from utils import Polygon
 
 def lci(I_in, *args):
     """
