@@ -24,36 +24,11 @@ from PIL import Image, ImageDraw
 UTLS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTLS_PATH))
 from handle import CLASSES, CLASS_IDS, POLYGON_DATA_DIR, PATHS, get_area_tif, get_area_labels
-from text import title, tabbed
-from utils import Polygon as PolygonData
+from text import title
+from utils import Polygon as PolygonData, calculate_bbox_size_meters
 
 # Create reverse mapping for class names
 CLASS_NAMES = {v: k for k, v in CLASSES.items()}
-
-def calculate_bbox_size_meters(bounds, crs):
-    """Calculate the size of a bounding box in meters."""
-    minx, miny, maxx, maxy = bounds
-
-    # Convert to WGS84 if needed
-    if crs and crs.to_epsg() != 4326:
-        transformer = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
-        p1_wgs84 = transform(transformer.transform, Point(minx, miny))
-        p2_wgs84 = transform(transformer.transform, Point(maxx, miny))
-        p3_wgs84 = transform(transformer.transform, Point(minx, maxy))
-        
-        minx_wgs, miny_wgs = p1_wgs84.x, p1_wgs84.y
-        maxx_wgs = p2_wgs84.x
-        maxy_wgs = p3_wgs84.y
-    else:
-        minx_wgs, miny_wgs = minx, miny
-        maxx_wgs, maxy_wgs = maxx, maxy
-
-    geod = Geod(ellps="WGS84")
-    _, _, width_m = geod.inv(minx_wgs, miny_wgs, maxx_wgs, miny_wgs)
-    _, _, height_m = geod.inv(minx_wgs, miny_wgs, minx_wgs, maxy_wgs)
-
-    return (abs(width_m), abs(height_m))
-
 
 def save_tif(array, output_path: Path, transform, crs):
     """Save numpy array as georeferenced TIF."""

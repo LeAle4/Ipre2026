@@ -20,6 +20,7 @@ UNITA_PATHS = {
     "summary": DATA_DIR / "unita_polygons" / "summary.json",
     "resized": DATA_DIR / "unita_resized",
     "crops": DATA_DIR / "unita_crops",
+    "negatives": DATA_DIR / "unita_negatives",
 }
 
 # Path mappings for ChugChug study area
@@ -29,6 +30,7 @@ CHUGCHUG_PATHS = {
     "summary": DATA_DIR / "chugchug_polygons" / "summary.json",
     "resized": DATA_DIR / "chugchug_resized",
     "crops": DATA_DIR / "chugchug_crops",
+    "negatives": DATA_DIR / "chugchug_negatives",
 }
 # Path mappings for Lluta study area
 LLUTA_PATHS = {
@@ -37,6 +39,7 @@ LLUTA_PATHS = {
     "summary": DATA_DIR / "lluta_polygons" / "summary.json",
     "resized": DATA_DIR / "lluta_resized",
     "crops": DATA_DIR / "lluta_crops",
+    "negatives": DATA_DIR / "lluta_negatives",
 }
 
 PATHS = {
@@ -79,16 +82,28 @@ def get_area_labels(area:str) -> Path:
     geojson_file = raw_path.glob("*.gpkg")
     return next(geojson_file)
 
+def _polygons_from_polygon_data(area_filter: tuple[str, ...], classes_filter: tuple[int, ...]) -> Generator[Polygon, None, None]:
+    """Generator yielding Polygon objects from polygon data directory.
+    """
+    for metadata_file in POLYGON_DATA_DIR.glob("*_metadata.json"):
+        polygon = Polygon().load_from_metadata(metadata_file)
+        if polygon.class_id in classes_filter and polygon.area in area_filter:
+            yield polygon
+
 def geos_from_polygon_data(area) -> Generator[Polygon, None, None]:
     """Generator yielding Polygon objects from polygon data directory, filtered by area and class.
     Args:
         area_filter: Tuple of area names to include (e.g., ('unita', 'chugchug')).
         class_filter: Tuple of class IDs to include (default: (1,) for geoglyphs).
     """
-    for metadata_file in POLYGON_DATA_DIR.glob("*_metadata.json"):
-        polygon = Polygon().load_from_metadata(metadata_file)
-        if polygon.area == area and polygon.class_id == CLASSES["geo"]:
-            yield polygon
+    yield from _polygons_from_polygon_data(area_filter=(area,), classes_filter=(CLASSES["geo"],))
+
+def negatives_from_polygon_data(area) -> Generator[Polygon, None, None]:
+    """Generator yielding negative sample Polygon objects from polygon data directory, filtered by area.
+    Args:
+        area_filter: Tuple of area names to include (e.g., ('unita', 'chugchug')).
+    """
+    yield from _polygons_from_polygon_data(area_filter=(area,), classes_filter=(CLASSES["ground"],))
 
 def load_img_array_from_path(path:Path) -> np.ndarray:
     """Load a GeoTIFF image from the given path and return as a NumPy array.
@@ -118,3 +133,15 @@ def make_crop_path(geo:Polygon, area:str, crop_id:int) -> Path:
     crop_dir = PATHS[area]["crops"] / f"geo_{geo.id}"
     crop_dir.mkdir(parents=True, exist_ok=True)
     return crop_dir / f"{geo.area}_class{geo.class_id}_{geo.id}_crop{crop_id}.png"
+
+def make_negative_path(area:str, negative_id:int) -> Path:
+    """Construct the path for a negative sample image.
+    
+    Args:
+        area: Study area name.
+        negative_id: Identifier for the negative sample.
+    """
+    negative_dir = PATHS[area]["negatives"]
+    negative_dir.mkdir(parents=True, exist_ok=True)
+    return negative_dir / f"{area}_class{CLASSES['ground']}_crop{negative_id}_0.png"
+    

@@ -17,6 +17,10 @@ data/unita_crops
 data/chugchug_crops
 data/lluta_crops
 
+data/unita_negatives
+data/chugchug_negatives
+data/lluta_negatives
+
 data/polygon_data
 
 #Python cache files
