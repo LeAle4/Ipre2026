@@ -15,9 +15,10 @@ from PIL import Image
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from handle import NEGATIVES_RATIO, PATHS, AREA_NAMES, CLASSES, WINDOW_SIZE, POLYGON_DATA_DIR, get_area_tif, get_area_labels, make_negative_path
+from handle import NEGATIVES_RATIO, PATHS, AREA_NAMES, CLASSES, WINDOW_SIZE, POLYGON_DATA_DIR, SCALES, get_area_tif, get_area_labels, make_negative_path
 from utils import Polygon, calculate_bbox_size_meters
 from text import title, tabbed
+from resize import lci
 
 def _negatives_per_area(area:str) -> int:
     """Count the number of crop files in the specified study area.
@@ -68,23 +69,24 @@ def not_overlapping(negative_boundary:ShapelyPolygon, boundaries:list[ShapelyPol
             return False
     return True
 
-def sample_boundary(tif_area, window_size:int = WINDOW_SIZE) -> tuple[Window, ShapelyPolygon]:
+def sample_boundary(tif_area, area:str, window_size:int = WINDOW_SIZE) -> tuple[Window, ShapelyPolygon]:
     """Sample a random boundary box within the tif area.
     
     Args:
         tif_area: Path to the tif file of the study area.
         window_size: Size of the square boundary to sample in pixels.
     """
+    window_size = int(window_size // SCALES[area])
     x,y = random.randint(0, tif_area.width - window_size), random.randint(0, tif_area.height - window_size)
     window = Window(x, y, window_size, window_size)
     bounds = tif_area.window_bounds(window)
     return window, box(*bounds)
     
-def save_boundary_as_geo(boundary:ShapelyPolygon, area:str, negative_id:int, img_save_path:Path, img_shape:tuple[int,int, int], crs) -> None:
+def save_boundary_as_geo(boundary:ShapelyPolygon, area:str, negative_id:int, img_save_path:Path, img_shape:tuple[int,int, int], crs, view_window:Window = None) -> None:
     """Generate and save a Polygon file for the negative sample boundary."""
     minx, miny, maxx, maxy = boundary.bounds
     
-    # Calculate size in meters
+    # Calculate size in meters using boundary (which is created from view_window)
     size_m = calculate_bbox_size_meters(boundary.bounds, crs)
     
     polygon = Polygon(
@@ -92,7 +94,7 @@ def save_boundary_as_geo(boundary:ShapelyPolygon, area:str, negative_id:int, img
         class_id = CLASSES["ground"],
         area = area,
         polygon_points = list(boundary.exterior.coords),
-        shape = (img_shape[1], img_shape[0], 3),  # (height, width, channels)
+        shape = img_shape,  # Use actual image shape (height, width, channels)
         size_m = size_m,
         coords = {'top': maxy, 'left': minx, 'bottom': miny, 'right': maxx},
         jpeg_path = Path(),
@@ -116,9 +118,12 @@ def save_boundary_image(src, boundary:Window, save_path:Path) -> tuple[int, int,
         boundary: Window object defining the boundary to save.
         save_path: Path to save the boundary image.
     """
-    img = src.read(1, window=boundary)
+    img = src.read(window=boundary)
     shape = img.shape
-    img = Image.fromarray(img)
+    # Transpose from (bands, height, width) to (height, width, bands)
+    img = img.transpose(1, 2, 0)
+    resized = lci(img, WINDOW_SIZE, WINDOW_SIZE)
+    img = Image.fromarray(resized)
     img.save(save_path)
 
     return shape
@@ -136,30 +141,39 @@ def parse_args():
 
     return parser.parse_args()
 
+def extract_negatives_area(area: str) -> None:
+    """Extract negative samples from polygon dataset for a single area.
+    
+    Args:
+        area: Study area to process (e.g., 'unita', 'chugchug', 'lluta').
+    """
+    sampled = 0
+    limit = _negatives_per_area(area)
+    print(title(f"Extracting negative samples for area: {area}, amount to sample: {limit}"))
+
+    # Load the area tif
+    tif_path = get_area_tif(area)
+    labels_path = get_area_labels(area)
+
+    tif_img = load_tif(tif_path)
+    boundaries = get_all_polygon_boundaries(labels_path, tif_img.crs)
+
+    while sampled < limit:
+        view_window, boundary = sample_boundary(tif_img, area)
+        # Check both polygon intersection and valid data presence
+        if not_overlapping(boundary, boundaries) and in_actual_data(tif_img, view_window):
+            sampled += 1
+            print(tabbed(f"Sampled negative {sampled}/{limit} for area {area}"))
+            # Since areas are so big, there is a low probability of sampling a crop from the same area, speeds up code
+            # boundaries.append(boundary)
+            save_path = make_negative_path(area, sampled)
+            img_shape = save_boundary_image(tif_img, view_window, save_path)
+            save_boundary_as_geo(boundary, area, sampled, save_path, img_shape, tif_img.crs, view_window)
+
+
 if __name__ == "__main__":
     args = parse_args()
     areas = args.area
 
     for area in areas:
-        sampled = 0
-        limit = _negatives_per_area(area)
-        print(title(f"Extracting negative samples for area: {area}, amount to sample: {limit}"))
-
-        #load the area tif
-        tif_path = get_area_tif(area)
-        labels_path = get_area_labels(area)
-
-        tif_img = load_tif(tif_path)
-        boundaries = get_all_polygon_boundaries(labels_path, tif_img.crs)
-
-        while sampled < limit:
-            view_window, boundary = sample_boundary(tif_img)
-            # Check both polygon intersection and valid data presence
-            if not_overlapping(boundary, boundaries) and in_actual_data(tif_img, view_window):
-                sampled += 1
-                print(tabbed(f"Sampled negative {sampled}/{limit} for area {area}"))
-                #Since areas are so big, there is a low probability of sampling a crop from the same area, speeds up code
-                #boundaries.append(boundary)
-                save_path = make_negative_path(area, sampled)
-                img_shape = save_boundary_image(tif_img, view_window, save_path)
-                save_boundary_as_geo(boundary, area, sampled, save_path, img_shape, tif_img.crs)
+        extract_negatives_area(area)

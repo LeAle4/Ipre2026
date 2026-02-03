@@ -259,19 +259,25 @@ def main():
     for area in args.area:
         process_area(area, args)
 
-def process_area(area, args):
-    """Process extraction for a single area."""
+def extract_area(area: str, limit: int = None, class_filter: int = CLASSES["geo"]) -> None:
+    """Extract images from geo-referenced data for a single area.
+    
+    Args:
+        area: Study area to process (e.g., 'unita', 'chugchug', 'lluta').
+        limit: Maximum number of polygons to process. None to process all.
+        class_filter: Process only polygons of a specific class. None to process all classes.
+    """
     print(title(f"Extracting polygons from area: {area}"))
     
     # Load data
     gpkg_path, ortho_path, output_dir = load_area_data(area)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    gdf = load_geodataframe(gpkg_path, ortho_path, args.limit)
+    gdf = load_geodataframe(gpkg_path, ortho_path, limit)
     print(f"Loaded {len(gdf)} polygons")
     
-    if args.class_filter is not None:
-        print(f"Filtering to class {args.class_filter} ({CLASS_NAMES.get(args.class_filter, 'unknown')})\n")
+    if class_filter is not None:
+        print(f"Filtering to class {class_filter} ({CLASS_NAMES.get(class_filter, 'unknown')})\n")
     
     # Process each polygon
     processed_count = 0
@@ -279,7 +285,7 @@ def process_area(area, args):
         polygon_class = row['class']
         
         # Apply class filter
-        if args.class_filter is not None and polygon_class != args.class_filter:
+        if class_filter is not None and polygon_class != class_filter:
             continue
         
         class_name = CLASS_NAMES.get(polygon_class, 'unknown')
@@ -292,6 +298,11 @@ def process_area(area, args):
         processed_count += 1
     
     print(f"\nDone! Processed {processed_count} polygons for {area}")
+
+
+def process_area(area, args):
+    """Process extraction for a single area."""
+    extract_area(area, args.limit, args.class_filter)
 
 
 if __name__ == "__main__":

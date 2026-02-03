@@ -141,16 +141,25 @@ def parse_arguments():
     )
     return parser.parse_args()
 
+def resize_area(area: str) -> None:
+    """Resize polygon images to a standard size for a single area.
+    
+    Args:
+        area: Study area to process (e.g., 'unita', 'chugchug', 'lluta').
+    """
+    print(title(f"Resizing polygons in area: {area}"))
+    geos = geos_from_polygon_data(area)
+    for geo in geos:
+        print(f"Resizing polygon ID {geo.id}...")
+        resized_array = resize_polygon(geo, scale=SCALES[area])
+        save_path = make_resized_path(geo, area)
+        save_resized_polygon(geo, resized_array, save_path)
+
+
 if __name__ == "__main__":
     args = parse_arguments()
     areas = args.area
 
     POLYGON_DATA_DIR.mkdir(parents=True, exist_ok=True)
     for area in areas:
-        print(title(f"Resizing polygons in area: {area}"))
-        geos = geos_from_polygon_data(area)
-        for geo in geos:
-            print(f"Resizing polygon ID {geo.id}...")
-            resized_array = resize_polygon(geo, scale=SCALES[area])
-            save_path = make_resized_path(geo, area)
-            save_resized_polygon(geo, resized_array, save_path)
+        resize_area(area)
