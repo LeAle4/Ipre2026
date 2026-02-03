@@ -5,10 +5,8 @@ Includes path management, polygon metadata parsing, and filtering by class.
 """
 import json
 import shapely
-import numpy as np
 
-from PIL import Image
-from typing import Generator, Optional
+from typing import Optional
 from pathlib import Path
 from shapely.geometry import Point
 from shapely.ops import transform
