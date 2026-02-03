@@ -131,10 +131,11 @@ def get_polygon_crops(polygon:Polygon, crop_size:int=WINDOW_SIZE, stride:int=STR
     img_array = load_img_array_from_path(polygon.resized_path)
     return make_crops(polygon, img_array, crop_size, stride)
 
-def save_polygon_crop(crop_array:np.ndarray, save_path:Path) -> None:
+def save_polygon_crop(geo, crop_array:np.ndarray, save_path:Path) -> None:
     """Save a crop array as an image.
     
     Args:
+        geo: Polygon object to update with the crop path.
         crop_array: Crop image as a NumPy array.
         save_path: Path to save the crop image.
     """
@@ -154,15 +155,24 @@ def parse_arguments():
     )
     return parser.parse_args()
 
+def crop_area(area: str) -> None:
+    """Generate crops from resized polygon images for a single area.
+    
+    Args:
+        area: Study area to process (e.g., 'unita', 'chugchug', 'lluta').
+    """
+    print(title(f"Generating crops for polygons in area: {area}"))
+    for geo in geos_from_polygon_data(area):
+        print(f"Generating crops for polygon ID {geo.id}...")
+        for id, geo_crop in enumerate(get_polygon_crops(geo)):
+            print(tabbed(f"Saving crop ID {id}..."))
+            crop_path = make_crop_path(geo, area, id)
+            save_polygon_crop(geo, geo_crop, crop_path)
+
+
 if __name__ == "__main__":
     args = parse_arguments()
     areas = args.area
 
     for area in areas:
-        print(title(f"Generating crops for polygons in area: {area}"))
-        for geo in geos_from_polygon_data(area):
-            print(f"Generating crops for polygon ID {geo.id}...")
-            for id, geo_crop in enumerate(get_polygon_crops(geo)):
-                print(tabbed(f"Saving crop ID {id}..."))
-                crop_path = make_crop_path(geo, area, id)
-                save_polygon_crop(geo_crop, crop_path)
+        crop_area(area)
