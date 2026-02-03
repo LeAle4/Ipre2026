@@ -144,4 +144,13 @@ def make_negative_path(area:str, negative_id:int) -> Path:
     negative_dir = PATHS[area]["negatives"]
     negative_dir.mkdir(parents=True, exist_ok=True)
     return negative_dir / f"{area}_class{CLASSES['ground']}_crop{negative_id}_0.png"
+
+def crops_in_area(area:str) -> int:
+    """Count the number of crop files in the specified study area.
     
+    Args:
+        area: Study area name (e.g., 'unita', 'chugchug', 'lluta').
+    """
+    crop_dir = PATHS[area]["crops"]
+    crop_files = [f for f in crop_dir.rglob("*.png") if "negatives" not in f.parts]
+    return len(crop_files)

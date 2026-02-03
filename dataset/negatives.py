@@ -15,20 +15,19 @@ from PIL import Image
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from handle import NEGATIVES_RATIO, PATHS, AREA_NAMES, CLASSES, WINDOW_SIZE, POLYGON_DATA_DIR, SCALES, get_area_tif, get_area_labels, make_negative_path
+from handle import NEGATIVES_RATIO, crops_in_area, AREA_NAMES, CLASSES, WINDOW_SIZE, POLYGON_DATA_DIR, SCALES, get_area_tif, get_area_labels, make_negative_path
 from utils import Polygon, calculate_bbox_size_meters
 from text import title, tabbed
 from resize import lci
 
 def _negatives_per_area(area:str) -> int:
-    """Count the number of crop files in the specified study area.
+    """Calculate the number of negative samples to extract for a given area.
     
     Args:
         area: Study area name (e.g., 'unita', 'chugchug', 'lluta').
     """
-    crop_dir = PATHS[area]["crops"]
-    crop_files = [f for f in crop_dir.rglob("*.png") if "negatives" not in f.parts]
-    return len(crop_files) * NEGATIVES_RATIO
+    num_crops = crops_in_area(area)
+    return int(num_crops * NEGATIVES_RATIO)
 
 def load_tif(tif_path:Path):
     return rasterio.open(tif_path)
