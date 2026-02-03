@@ -1,17 +1,23 @@
 import sys
 import argparse
+import random
 
 from pathlib import Path
 
+import numpy as np
 import rasterio
 import geopandas as gpd
+
+from rasterio.windows import Window
 from shapely.geometry import box, Polygon as ShapelyPolygon
+from PIL import Image
 
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from handle import NEGATIVES_RATIO, PATHS, AREA_NAMES, CLASS_IDS, CLASS_NAMES, WINDOW_SIZE, POLYGON_DATA_DIR, get_area_tif, get_area_labels
-from utils import Polygon
+from handle import NEGATIVES_RATIO, PATHS, AREA_NAMES, CLASSES, WINDOW_SIZE, POLYGON_DATA_DIR, get_area_tif, get_area_labels, make_negative_path
+from utils import Polygon, calculate_bbox_size_meters
+from text import title, tabbed
 
 def _negatives_per_area(area:str) -> int:
     """Count the number of crop files in the specified study area.
@@ -20,26 +26,102 @@ def _negatives_per_area(area:str) -> int:
         area: Study area name (e.g., 'unita', 'chugchug', 'lluta').
     """
     crop_dir = PATHS[area]["crops"]
-    crop_files = list(crop_dir.rglob("*.png"))
+    crop_files = [f for f in crop_dir.rglob("*.png") if "negatives" not in f.parts]
     return len(crop_files) * NEGATIVES_RATIO
 
 def load_tif(tif_path:Path):
-    raise NotImplementedError("This function is not yet implemented.")
+    return rasterio.open(tif_path)
 
-def get_all_polygon_boundaries(boundary_path: Path)-> list[ShapelyPolygon]:
-    raise NotImplementedError("This function is not yet implemented.")
+def get_all_polygon_boundaries(boundary_path: Path, target_crs) -> list[ShapelyPolygon]:    
+    gdf = gpd.read_file(boundary_path)
+    if gdf.crs != target_crs:
+        gdf = gdf.to_crs(target_crs)
+    return list(gdf.geometry)
 
-def check_negative_validity(negative_boundary:tuple[float,float], boundaries:tuple[tuple[float,float],...], min_distance:float = 0.0001) -> bool:
-    raise NotImplementedError("This function is not yet implemented.")
+def in_actual_data(tif_area, view_window:Window, threshold:float = 1) -> bool:
+    """Check if the specified window contains valid data above the threshold.
+    
+    Args:
+        tif_area: Rasterio dataset object of the study area.
+        view_window: Window object defining the area to check.
+        threshold: Minimum fraction of valid data required (0-1).
+    """
+    data = tif_area.read(1, window=view_window)
+    no_data_value = tif_area.nodata
+    
+    # If nodata is defined, use it
+    if no_data_value is not None:
+        valid_pixels = np.sum(data != no_data_value)
+    else:
+        # If nodata is None, assume common no-data values (white=255 for uint8)
+        # Count pixels that are not pure white (255) and not pure black (0)
+        valid_pixels = np.sum((data != 255) & (data != 0))
+    
+    total_pixels = data.size
+    fraction_valid = valid_pixels / total_pixels if total_pixels > 0 else 0
+    
+    return fraction_valid >= threshold
 
-def sample_boundary(tif_area, window_size:int = WINDOW_SIZE) -> tuple[tuple[float,float],...]:
-    raise NotImplementedError("This function is not yet implemented.")
+def not_overlapping(negative_boundary:ShapelyPolygon, boundaries:list[ShapelyPolygon]) -> bool:
+    for boundary in boundaries:
+        if negative_boundary.intersects(boundary) or boundary.contains(negative_boundary):
+            return False
+    return True
 
-def save_boundary_as_geo() -> None:
-    raise NotImplementedError("This function is not yet implemented.")
+def sample_boundary(tif_area, window_size:int = WINDOW_SIZE) -> tuple[Window, ShapelyPolygon]:
+    """Sample a random boundary box within the tif area.
+    
+    Args:
+        tif_area: Path to the tif file of the study area.
+        window_size: Size of the square boundary to sample in pixels.
+    """
+    x,y = random.randint(0, tif_area.width - window_size), random.randint(0, tif_area.height - window_size)
+    window = Window(x, y, window_size, window_size)
+    bounds = tif_area.window_bounds(window)
+    return window, box(*bounds)
+    
+def save_boundary_as_geo(boundary:ShapelyPolygon, area:str, negative_id:int, img_save_path:Path, img_shape:tuple[int,int, int], crs) -> None:
+    """Generate and save a Polygon file for the negative sample boundary."""
+    minx, miny, maxx, maxy = boundary.bounds
+    
+    # Calculate size in meters
+    size_m = calculate_bbox_size_meters(boundary.bounds, crs)
+    
+    polygon = Polygon(
+        id = negative_id,
+        class_id = CLASSES["ground"],
+        area = area,
+        polygon_points = list(boundary.exterior.coords),
+        shape = (img_shape[1], img_shape[0], 3),  # (height, width, channels)
+        size_m = size_m,
+        coords = {'top': maxy, 'left': minx, 'bottom': miny, 'right': maxx},
+        jpeg_path = Path(),
+        tif_path = Path(),
+        overlay_path = Path(),
+        resized_path = Path(),
+        crop_paths = [img_save_path],
+        augmented_paths = [],
+        polygon = boundary
+    )
+    
+    # Save metadata
+    POLYGON_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    polygon.save_metadata(POLYGON_DATA_DIR / f"{area}_class{polygon.class_id}_{polygon.id}_metadata.json")
 
-def save_boundary_image(boundary:tuple[float,float], save_path:Path) -> None:
-    raise NotImplementedError("This function is not yet implemented.")
+def save_boundary_image(src, boundary:Window, save_path:Path) -> tuple[int, int, int]:
+    """
+    Save the RGB image corresponding to the boundary window to the specified path.
+
+    Args:
+        boundary: Window object defining the boundary to save.
+        save_path: Path to save the boundary image.
+    """
+    img = src.read(1, window=boundary)
+    shape = img.shape
+    img = Image.fromarray(img)
+    img.save(save_path)
+
+    return shape
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Extract negative samples from polygon dataset.")
@@ -61,23 +143,23 @@ if __name__ == "__main__":
     for area in areas:
         sampled = 0
         limit = _negatives_per_area(area)
-        print(f"Extracting negative samples for area: {area}, amount to sample: {limit}")
+        print(title(f"Extracting negative samples for area: {area}, amount to sample: {limit}"))
 
         #load the area tif
         tif_path = get_area_tif(area)
         labels_path = get_area_labels(area)
 
-        boundaries = get_all_polygon_boundaries(labels_path)
         tif_img = load_tif(tif_path)
+        boundaries = get_all_polygon_boundaries(labels_path, tif_img.crs)
 
         while sampled < limit:
-            boundary = sample_boundary(tif_path)
-            if check_negative_validity(boundary, boundaries):
+            view_window, boundary = sample_boundary(tif_img)
+            # Check both polygon intersection and valid data presence
+            if not_overlapping(boundary, boundaries) and in_actual_data(tif_img, view_window):
                 sampled += 1
-                print(f"Sampled negative {sampled}/{limit} for area {area} at boundary {boundary}")
-                boundaries.append(boundary)
+                print(tabbed(f"Sampled negative {sampled}/{limit} for area {area}"))
+                #Since areas are so big, there is a low probability of sampling a crop from the same area, speeds up code
+                #boundaries.append(boundary)
                 save_path = make_negative_path(area, sampled)
-                save_boundary_image(boundary, save_path)
-                save_boundary_as_geo(boundary, area, sampled)
-
-        
+                img_shape = save_boundary_image(tif_img, view_window, save_path)
+                save_boundary_as_geo(boundary, area, sampled, save_path, img_shape, tif_img.crs)
