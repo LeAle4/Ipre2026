@@ -155,7 +155,7 @@ def create_polygon_metadata(polygon_idx, geometry, polygon_class, ortho_chunk, b
     
     # Save metadata
     POLYGON_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    poly_obj.save_metadata(POLYGON_DATA_DIR / f"{area}_class{poly_obj.class_id}_{poly_obj.id}_metadata.json")
+    poly_obj.save_metadata(POLYGON_DATA_DIR)
     
     return tif_path, jpeg_path, overlay_path, polygons
 

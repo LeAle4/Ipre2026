@@ -169,6 +169,7 @@ def crop_area(area: str) -> None:
             crop_path = make_crop_path(geo, area, id)
             save_polygon_crop(geo, geo_crop, crop_path)
         
+        POLYGON_DATA_DIR.mkdir(parents=True, exist_ok=True)
         geo.save_metadata(POLYGON_DATA_DIR)
 
 

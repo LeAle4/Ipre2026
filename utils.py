@@ -83,6 +83,7 @@ class Polygon:
             "augmented_paths": [str(p) for p in self.augmented_paths],
         }
 
+        save_path = save_path / f"{self.area}_class{self.class_id}_{self.id}_metadata.json"
         with open(save_path, 'w') as f:
             json.dump(metadata, f, indent=4)
 
