@@ -13,7 +13,7 @@ from shapely.geometry import box
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from handle import WINDOW_SIZE, STRIDE, THRESHOLD_CROP_CONTENT, geos_from_polygon_data, make_crop_path, load_img_array_from_path
+from handle import POLYGON_DATA_DIR, WINDOW_SIZE, STRIDE, THRESHOLD_CROP_CONTENT, geos_from_polygon_data, make_crop_path, load_img_array_from_path
 from text import title, tabbed
 from utils import Polygon, pixels_to_coordinates
 
@@ -168,6 +168,8 @@ def crop_area(area: str) -> None:
             print(tabbed(f"Saving crop ID {id}..."))
             crop_path = make_crop_path(geo, area, id)
             save_polygon_crop(geo, geo_crop, crop_path)
+        
+        geo.save_metadata(POLYGON_DATA_DIR)
 
 
 if __name__ == "__main__":
