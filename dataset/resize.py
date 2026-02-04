@@ -125,7 +125,7 @@ def save_resized_polygon(geo:Polygon, resized_array:np.ndarray, save_path:Path) 
     # Save resized image
     img = Image.fromarray(resized_array)
     geo.resized_path = save_path
-    geo.save_metadata(POLYGON_DATA_DIR / f"{geo.area}_class{geo.class_id}_{geo.id}_metadata.json")
+    geo.save_metadata(POLYGON_DATA_DIR)
     img.save(save_path)
 
 """Code for use in the command line to resize polygon images to a standard size."""

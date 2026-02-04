@@ -107,7 +107,7 @@ def save_boundary_as_geo(boundary:ShapelyPolygon, area:str, negative_id:int, img
     
     # Save metadata
     POLYGON_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    polygon.save_metadata(POLYGON_DATA_DIR / f"{area}_class{polygon.class_id}_{polygon.id}_metadata.json")
+    polygon.save_metadata(POLYGON_DATA_DIR)
 
 def save_boundary_image(src, boundary:Window, save_path:Path) -> tuple[int, int, int]:
     """
