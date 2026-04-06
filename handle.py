@@ -58,7 +58,10 @@ CLASS_IDS = tuple(CLASSES.values())  # (1, 2, 3)
 CLASS_NAMES = tuple(CLASSES.keys())  # ('geo', 'ground', 'road')
 AREA_NAMES = tuple(PATHS.keys())  # ('unita', 'chugchug', 'lluta')
 
+
+#Change to be calculated
 SCALES = {'unita': 0.886, 'lluta': 0.218, 'chugchug': 0.18}
+
 WINDOW_SIZE = 224
 STRIDE = int(WINDOW_SIZE / 2)
 THRESHOLD_CROP_CONTENT = 0.8  # Minimum fraction of geoglyph pixels in a crop to be considered valid

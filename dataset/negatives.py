@@ -140,7 +140,7 @@ def parse_args():
 
     return parser.parse_args()
 
-def extract_negatives_area(area: str) -> None:
+def extract_negatives_area(area: str) -> tuple[list[ShapelyPolygon], rasterio.DatasetReader]:
     """Extract negative samples from polygon dataset for a single area.
     
     Args:
@@ -156,6 +156,7 @@ def extract_negatives_area(area: str) -> None:
 
     tif_img = load_tif(tif_path)
     boundaries = get_all_polygon_boundaries(labels_path, tif_img.crs)
+    save_boundaries = []
 
     while sampled < limit:
         view_window, boundary = sample_boundary(tif_img, area)
@@ -165,14 +166,24 @@ def extract_negatives_area(area: str) -> None:
             print(tabbed(f"Sampled negative {sampled}/{limit} for area {area}"))
             # Since areas are so big, there is a low probability of sampling a crop from the same area, speeds up code
             # boundaries.append(boundary)
+            save_boundaries.append(boundary)
             save_path = make_negative_path(area, sampled)
             img_shape = save_boundary_image(tif_img, view_window, save_path)
             save_boundary_as_geo(boundary, area, sampled, save_path, img_shape, tif_img.crs, view_window)
 
+    return save_boundaries, tif_img
+
+def save_negatives_boundaries(boundaries:list[ShapelyPolygon], area:str, area_crs:str) -> None:
+    """Save the negative sample boundaries as a GeoJSON file."""
+    gdf = gpd.GeoDataFrame(geometry=boundaries, crs=area_crs)
+    save_path = POLYGON_DATA_DIR / f"{area}_negatives.geojson"
+    gdf.to_file(save_path, driver="GeoJSON")
+    print(tabbed(f"Saved negative boundaries for area {area} to {save_path}"))
 
 if __name__ == "__main__":
     args = parse_args()
     areas = args.area
 
     for area in areas:
-        extract_negatives_area(area)
+        save_boundaries, area_tif = extract_negatives_area(area)
+        save_negatives_boundaries(save_boundaries, area, area_tif.crs)
