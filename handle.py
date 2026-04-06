@@ -93,13 +93,13 @@ def _polygons_from_polygon_data(area_filter: tuple[str, ...], classes_filter: tu
         if polygon.class_id in classes_filter and polygon.area in area_filter:
             yield polygon
 
-def geos_from_polygon_data(area) -> Generator[Polygon, None, None]:
+def geos_from_polygon_data(area, classes_filter = (CLASSES["geo"],)) -> Generator[Polygon, None, None]:
     """Generator yielding Polygon objects from polygon data directory, filtered by area and class.
     Args:
         area_filter: Tuple of area names to include (e.g., ('unita', 'chugchug')).
         class_filter: Tuple of class IDs to include (default: (1,) for geoglyphs).
     """
-    yield from _polygons_from_polygon_data(area_filter=(area,), classes_filter=(CLASSES["geo"],))
+    yield from _polygons_from_polygon_data(area_filter=(area,), classes_filter=classes_filter)
 
 def negatives_from_polygon_data(area) -> Generator[Polygon, None, None]:
     """Generator yielding negative sample Polygon objects from polygon data directory, filtered by area.
