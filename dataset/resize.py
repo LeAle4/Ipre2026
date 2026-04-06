@@ -52,6 +52,8 @@ def lci(I_in, *args):
         mi, ni = args
     elif len(args) == 1:
         scale = args[0]
+
+        #Width and height scale might be different by a fraction of a pixel
         mi = int(round(scale * n1))
         ni = int(round(scale * n2))
     else:
@@ -109,8 +111,10 @@ def resize_polygon(polygon:Polygon, scale:float) -> np.ndarray:
     """
     img_array = load_img_array_from_path(polygon.tif_path)
     print(tabbed(f"Original shape: {img_array.shape}, resizing with scale {scale}"))
+    
     resized_array = lci(img_array, scale)
     print(tabbed(f"Resized shape: {resized_array.shape}"))
+    
     polygon.shape = resized_array.shape
     return resized_array
 
