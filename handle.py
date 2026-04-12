@@ -4,10 +4,10 @@ from pathlib import Path
 from typing import Generator
 
 import numpy as np
+import rasterio
 from PIL import Image
 
 from utils import Polygon
-
 
 # Project directory structure
 ROOT = Path(__file__).resolve().parent
@@ -59,10 +59,9 @@ CLASS_IDS = tuple(CLASSES.values())  # (1, 2, 3)
 CLASS_NAMES = tuple(CLASSES.keys())  # ('geo', 'ground', 'road')
 AREA_NAMES = tuple(PATHS.keys())  # ('unita', 'chugchug', 'lluta')
 
-
 #Change to be calculated
-SCALES = {'unita': 0.886, 'lluta': 0.218, 'chugchug': 0.18}
-
+TARGET_SCALE = 0.05  # Desired scale in meters per pixel for the resized images
+SCALE_FACTORS = {area_name: get_area_scale(area_name) / TARGET_SCALE for area_name in AREA_NAMES}
 WINDOW_SIZE = 224
 STRIDE = int(WINDOW_SIZE / 2)
 THRESHOLD_CROP_CONTENT = 0.8  # Minimum fraction of geoglyph pixels in a crop to be considered valid
@@ -160,6 +159,48 @@ class PolygonData:
         """
         polygon_dict_list = [polygon.get_metadata() for polygon in polygons]
         cls.save_polygon_metadata(polygon_dict_list)
+
+def calculate_area_scale(area:str) -> float:
+    """Calculate the scale factor for a given study area based on the average size of geoglyphs.
+    
+    Args:
+        area: Name of the study area ('unita', 'chugchug', or 'lluta').
+    """
+    area_polygons = tuple(PolygonData.polygons(area_filter=(area,), classes_filter=(CLASSES["geo"],)))
+    scales = []
+    for geo in area_polygons:
+        pix_x, pix_y = geo.shape
+        size_x_m, size_y_m = geo.size_m
+        scale = (pix_x / size_x_m + pix_y / size_y_m)/2
+        scales.append(scale)
+    average_scale = sum(scales) / len(scales)
+    return average_scale
+
+def get_area_scale(area:str) -> float:
+    """Get the scale factor for a given study area.
+    
+    Attempts to extract pixel size from GeoTIFF transform. Detects unit (meters or km)
+    and converts to meters if needed.
+    
+    Args:
+        area: Name of the study area ('unita', 'chugchug', or 'lluta').
+    """
+    tif = get_area_tif(area)
+    with rasterio.open(tif) as dataset:
+
+        if dataset.crs.is_geographic:
+            # If the CRS is geographic, we need to calculate the pixel size in meters
+            # using the latitude of the area (assuming it's near the equator for simplicity)
+            lat = dataset.bounds.top  # Use the top latitude of the dataset
+            pixel_size_x = abs(dataset.transform.a) * (111320 * np.cos(np.radians(lat)))  # Convert degrees to meters
+            pixel_size_y = abs(dataset.transform.e) * 111320  # Convert degrees to meters
+            scale = (pixel_size_x + pixel_size_y) / 2
+        else:
+            pixel_size_x = abs(dataset.transform.a)
+            pixel_size_y = abs(dataset.transform.e)
+            scale = (pixel_size_x + pixel_size_y) / 2
+
+    return scale
 
 def get_area_tif(area:str) -> Path:
     """Get the path to the orthomosaic GeoTIFF for the specified study area.

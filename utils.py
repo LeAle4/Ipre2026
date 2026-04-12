@@ -3,7 +3,6 @@
 Provides a unified interface for accessing polygon data from Unita, ChugChug, and Lluta sites.
 Includes path management, polygon metadata parsing, and filtering by class.
 """
-import json
 import shapely
 
 from typing import Optional
@@ -131,6 +130,3 @@ def pixels_to_coordinates(polygon:Polygon, pixel_coords:tuple[int, int]) -> tupl
     lat = y_max - (y_pixel / img_height) * (y_max - y_min)  # Invert y-axis for latitude
 
     return (lon, lat)
-
-if __name__ == "__main__":
-    pass
