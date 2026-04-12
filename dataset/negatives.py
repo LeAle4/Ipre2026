@@ -3,6 +3,7 @@ import argparse
 import random
 
 from pathlib import Path
+from multiprocessing import Pool
 
 import numpy as np
 import rasterio
@@ -16,7 +17,7 @@ from PIL import Image
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from handle import ROOT, DATA_DIR, NEGATIVES_RATIO, AREA_NAMES, CLASSES, WINDOW_SIZE, PolygonData, SCALES, get_area_tif, get_area_labels, make_negative_path
+from handle import ROOT, PATHS, NEGATIVES_RATIO, AREA_NAMES, CLASSES, WINDOW_SIZE, PolygonData, SCALES, get_area_tif, get_area_labels, make_negative_path
 from utils import Polygon, calculate_bbox_size_meters
 from text import title, tabbed
 from resize import lci
@@ -148,6 +149,57 @@ def parse_args():
 
     return parser.parse_args()
 
+def sampler(area: str, start_id: int, num_to_sample: int):
+    tif_path = get_area_tif(area)
+    tif_img = load_tif(tif_path)
+    boundaries = get_all_polygon_boundaries(get_area_labels(area), tif_img.crs)
+    prepared_boundaries = [prep(boundary) for boundary in boundaries]
+    nodata_value = tif_img.nodata
+    sampled_boundaries = []
+    polygons_to_save = []  # Batch metadata saves
+    while (sampled := len(sampled_boundaries)) < num_to_sample:
+        print(tabbed(f"Sampling negative {start_id + sampled + 1}/{start_id + num_to_sample} for {area}"))
+        view_window, boundary = sample_boundary(tif_img, area)
+        if not_overlapping(boundary, prepared_boundaries) and in_actual_data(tif_img, view_window, nodata_value):
+            sampled_boundaries.append(boundary)
+            # Create Polygon object and add to batch save list
+            save_path = make_negative_path(area, sampled + start_id)
+            img_shape = save_boundary_image(tif_img, view_window, save_path)
+            polygon = _create_negative_polygon(boundary, area, len(sampled_boundaries), save_path, img_shape, tif_img.crs, view_window)
+            polygons_to_save.append(polygon)
+    
+    return sampled_boundaries, polygons_to_save
+
+def extract_negatives_area_parallel(area:str) -> tuple[list[ShapelyPolygon], list[Polygon]]:
+    num_to_sample = _negatives_per_area(area)
+    num_processes = min(4, num_to_sample)  # Limit to 4 processes or number of samples
+    samples_per_process = num_to_sample // num_processes
+    extra_samples = num_to_sample % num_processes
+
+    args_list = []
+    start_id = 0
+    for i in range(num_processes):
+        count = samples_per_process + (1 if i < extra_samples else 0)  # Distribute extra samples
+        args_list.append((area, start_id, count))
+        start_id += count
+
+    with Pool(processes=num_processes) as pool:
+        try:
+            results = pool.starmap(sampler, args_list)
+        except KeyboardInterrupt:
+            pool.terminate()
+            pool.join()
+            raise
+
+    all_boundaries = [boundary for result in results for boundary in result[0]]
+    all_polygons = [polygon for result in results for polygon in result[1]]
+
+    PolygonData.save_polygons(all_polygons)
+
+    tif_img = load_tif(get_area_tif(area))
+
+    return all_boundaries, tif_img
+
 def extract_negatives_area(area: str) -> tuple[list[ShapelyPolygon], rasterio.DatasetReader]:
     """Extract negative samples from polygon dataset for a single area.
     
@@ -176,7 +228,6 @@ def extract_negatives_area(area: str) -> tuple[list[ShapelyPolygon], rasterio.Da
         # Check both polygon intersection and valid data presence
         if not_overlapping(boundary, prepared_boundaries) and in_actual_data(tif_img, view_window, no_data_value):
             sampled += 1
-            print(tabbed(f"Sampled negative {sampled}/{limit} for area {area}"))
             save_boundaries.append(boundary)
             save_path = make_negative_path(area, sampled)
             img_shape = save_boundary_image(tif_img, view_window, save_path)
@@ -192,7 +243,7 @@ def extract_negatives_area(area: str) -> tuple[list[ShapelyPolygon], rasterio.Da
 def save_negatives_boundaries(boundaries:list[ShapelyPolygon], area:str, area_crs:str) -> None:
     """Save the negative sample boundaries as a GeoJSON file."""
     gdf = gpd.GeoDataFrame(geometry=boundaries, crs=area_crs)
-    save_path = DATA_DIR / f"{area}_negatives.geojson"
+    save_path = PATHS[area]["negatives"] / f"{area}_negatives.geojson"
     gdf.to_file(save_path, driver="GeoJSON")
     print(tabbed(f"Saved negative boundaries for area {area} to {save_path}"))
 
@@ -201,5 +252,5 @@ if __name__ == "__main__":
     areas = args.area
 
     for area in areas:
-        save_boundaries, area_tif = extract_negatives_area(area)
+        save_boundaries, area_tif = extract_negatives_area_parallel(area)
         save_negatives_boundaries(save_boundaries, area, area_tif.crs)
