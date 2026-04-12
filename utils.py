@@ -35,17 +35,14 @@ class Polygon:
         self.augmented_paths = augmented_paths
         self.polygon = polygon
 
-    def load_from_metadata(self, path:Path) -> "Polygon":
+    def load_from_metadata(self, metadata:dict) -> "Polygon":
         """Load polygon metadata from a JSON file.
         
         Args:
-            path: Path to the metadata JSON file.
+            metadata: Dictionary containing the polygon metadata.
         """
-        with open(path, 'r') as f:
-            metadata = json.load(f)
-        
-        self.id = metadata["id"]
-        self.class_id = metadata["class_id"]
+        self.id = int(metadata["id"])
+        self.class_id = int(metadata["class_id"])
         self.area = metadata["area"]
         self.polygon_points = metadata["polygon_points"]
         self.shape = tuple(metadata["shape"])
@@ -61,15 +58,15 @@ class Polygon:
 
         return self
 
-    def save_metadata(self, save_path:Path) -> None:
-        """Save the polygon's metadata to a JSON file.
+    def get_metadata(self) -> dict:
+        """Get the polygon's metadata as a dictionary.
         
-        Args:
-            save_path: Path to save the metadata JSON file.
+        Returns:
+            Dictionary containing the polygon metadata.
         """
         metadata = {
-            "id": self.id,
-            "class_id": self.class_id,
+            "id": int(self.id),
+            "class_id": int(self.class_id),
             "area": self.area,
             "polygon_points": self.polygon_points,
             "shape": self.shape,
@@ -83,9 +80,7 @@ class Polygon:
             "augmented_paths": [str(p) for p in self.augmented_paths],
         }
 
-        save_path = save_path / f"{self.area}_class{self.class_id}_{self.id}_metadata.json"
-        with open(save_path, 'w') as f:
-            json.dump(metadata, f, indent=4)
+        return metadata
 
 def calculate_bbox_size_meters(bounds, crs):
     """Calculate the size of a bounding box in meters."""

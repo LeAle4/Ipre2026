@@ -15,7 +15,7 @@ from PIL import Image
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from handle import NEGATIVES_RATIO, crops_in_area, AREA_NAMES, CLASSES, WINDOW_SIZE, POLYGON_DATA_DIR, SCALES, get_area_tif, get_area_labels, make_negative_path
+from handle import ROOT, DATA_DIR, NEGATIVES_RATIO, AREA_NAMES, CLASSES, WINDOW_SIZE, PolygonData, SCALES, get_area_tif, get_area_labels, make_negative_path
 from utils import Polygon, calculate_bbox_size_meters
 from text import title, tabbed
 from resize import lci
@@ -26,7 +26,7 @@ def _negatives_per_area(area:str) -> int:
     Args:
         area: Study area name (e.g., 'unita', 'chugchug', 'lluta').
     """
-    num_crops = crops_in_area(area)
+    num_crops = PolygonData.crops_in_area(area)
     return int(num_crops * NEGATIVES_RATIO)
 
 def load_tif(tif_path:Path):
@@ -106,8 +106,7 @@ def save_boundary_as_geo(boundary:ShapelyPolygon, area:str, negative_id:int, img
     )
     
     # Save metadata
-    POLYGON_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    polygon.save_metadata(POLYGON_DATA_DIR)
+    PolygonData.save_polygons([polygon])
 
 def save_boundary_image(src, boundary:Window, save_path:Path) -> tuple[int, int, int]:
     """
@@ -123,7 +122,9 @@ def save_boundary_image(src, boundary:Window, save_path:Path) -> tuple[int, int,
     img = img.transpose(1, 2, 0)
     resized = lci(img, WINDOW_SIZE, WINDOW_SIZE)
     img = Image.fromarray(resized)
-    img.save(save_path)
+    output_path = ROOT / save_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(output_path)
 
     return shape
 
@@ -176,7 +177,7 @@ def extract_negatives_area(area: str) -> tuple[list[ShapelyPolygon], rasterio.Da
 def save_negatives_boundaries(boundaries:list[ShapelyPolygon], area:str, area_crs:str) -> None:
     """Save the negative sample boundaries as a GeoJSON file."""
     gdf = gpd.GeoDataFrame(geometry=boundaries, crs=area_crs)
-    save_path = POLYGON_DATA_DIR / f"{area}_negatives.geojson"
+    save_path = DATA_DIR / f"{area}_negatives.geojson"
     gdf.to_file(save_path, driver="GeoJSON")
     print(tabbed(f"Saved negative boundaries for area {area} to {save_path}"))
 

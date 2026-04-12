@@ -13,7 +13,7 @@ from shapely.geometry import box
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from handle import POLYGON_DATA_DIR, WINDOW_SIZE, STRIDE, THRESHOLD_CROP_CONTENT, geos_from_polygon_data, make_crop_path, load_img_array_from_path
+from handle import ROOT, CLASSES, PolygonData, WINDOW_SIZE, STRIDE, THRESHOLD_CROP_CONTENT, make_crop_path, load_img_array_from_path
 from text import title, tabbed
 from utils import Polygon, pixels_to_coordinates
 
@@ -140,7 +140,9 @@ def save_polygon_crop(geo, crop_array:np.ndarray, save_path:Path) -> None:
         save_path: Path to save the crop image.
     """
     img = Image.fromarray(crop_array)
-    img.save(save_path)
+    output_path = ROOT / save_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(output_path)
     geo.crop_paths.append(save_path)
 
 def parse_arguments():
@@ -162,16 +164,14 @@ def crop_area(area: str) -> None:
         area: Study area to process (e.g., 'unita', 'chugchug', 'lluta').
     """
     print(title(f"Generating crops for polygons in area: {area}"))
-    for geo in geos_from_polygon_data(area):
+    for geo in PolygonData.polygons(area_filter = (area,), classes_filter=(CLASSES["geo"],)):
         print(f"Generating crops for polygon ID {geo.id}...")
         for id, geo_crop in enumerate(get_polygon_crops(geo)):
             print(tabbed(f"Saving crop ID {id}..."))
             crop_path = make_crop_path(geo, area, id)
             save_polygon_crop(geo, geo_crop, crop_path)
         
-        POLYGON_DATA_DIR.mkdir(parents=True, exist_ok=True)
-        geo.save_metadata(POLYGON_DATA_DIR)
-
+        PolygonData.save_polygons([geo])
 
 if __name__ == "__main__":
     args = parse_arguments()

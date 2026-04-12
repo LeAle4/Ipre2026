@@ -6,7 +6,7 @@ from pathlib import Path
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from handle import AREA_NAMES, POLYGON_DATA_DIR
+from handle import AREA_NAMES
 from text import title
 
 # Import processing functions from each module
@@ -46,9 +46,6 @@ def run_pipeline(area: str, steps: list) -> None:
         steps: List of processing steps to run.
     """
     print(title(f"Starting pipeline for area: {area}"))
-    
-    # Ensure output directory exists
-    POLYGON_DATA_DIR.mkdir(parents=True, exist_ok=True)
     
     if "extract" in steps:
         print(title("STEP 1: Extracting polygons"))
