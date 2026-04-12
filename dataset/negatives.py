@@ -10,6 +10,7 @@ import geopandas as gpd
 
 from rasterio.windows import Window
 from shapely.geometry import box, Polygon as ShapelyPolygon
+from shapely.prepared import prep
 from PIL import Image
 
 UTILS_PATH = Path(__file__).resolve().parent.parent
@@ -32,39 +33,44 @@ def _negatives_per_area(area:str) -> int:
 def load_tif(tif_path:Path):
     return rasterio.open(tif_path)
 
-def get_all_polygon_boundaries(boundary_path: Path, target_crs) -> list[ShapelyPolygon]:    
+def get_all_polygon_boundaries(boundary_path: Path, target_crs) -> tuple[ShapelyPolygon]:    
     gdf = gpd.read_file(boundary_path)
     if gdf.crs != target_crs:
         gdf = gdf.to_crs(target_crs)
-    return list(gdf.geometry)
+    return tuple(gdf.geometry)
 
-def in_actual_data(tif_area, view_window:Window, threshold:float = 1) -> bool:
+def in_actual_data(tif_area, view_window:Window, no_data_value, threshold:float = 1) -> bool:
     """Check if the specified window contains valid data above the threshold.
     
     Args:
         tif_area: Rasterio dataset object of the study area.
         view_window: Window object defining the area to check.
+        no_data_value: Cached nodata value from tif_area.nodata.
         threshold: Minimum fraction of valid data required (0-1).
     """
     data = tif_area.read(1, window=view_window)
-    no_data_value = tif_area.nodata
     
     # If nodata is defined, use it
     if no_data_value is not None:
-        valid_pixels = np.sum(data != no_data_value)
+        valid_pixels = np.count_nonzero(data != no_data_value)
     else:
         # If nodata is None, assume common no-data values (white=255 for uint8)
-        # Count pixels that are not pure white (255) and not pure black (0)
-        valid_pixels = np.sum((data != 255) & (data != 0))
+        valid_pixels = np.count_nonzero((data != 255) & (data != 0))
     
     total_pixels = data.size
     fraction_valid = valid_pixels / total_pixels if total_pixels > 0 else 0
     
     return fraction_valid >= threshold
 
-def not_overlapping(negative_boundary:ShapelyPolygon, boundaries:list[ShapelyPolygon]) -> bool:
-    for boundary in boundaries:
-        if negative_boundary.intersects(boundary) or boundary.contains(negative_boundary):
+def not_overlapping(negative_boundary:ShapelyPolygon, prepared_boundaries:list) -> bool:
+    """Check if negative boundary doesn't overlap with any existing boundaries (uses prepared geometry).
+    
+    Args:
+        negative_boundary: Candidate boundary to check.
+        prepared_boundaries: List of prepared geometry objects for faster intersection checks.
+    """
+    for prep_boundary in prepared_boundaries:
+        if prep_boundary.intersects(negative_boundary):
             return False
     return True
 
@@ -81,14 +87,18 @@ def sample_boundary(tif_area, area:str, window_size:int = WINDOW_SIZE) -> tuple[
     bounds = tif_area.window_bounds(window)
     return window, box(*bounds)
     
-def save_boundary_as_geo(boundary:ShapelyPolygon, area:str, negative_id:int, img_save_path:Path, img_shape:tuple[int,int, int], crs, view_window:Window = None) -> None:
-    """Generate and save a Polygon file for the negative sample boundary."""
+def _create_negative_polygon(boundary:ShapelyPolygon, area:str, negative_id:int, img_save_path:Path, img_shape:tuple[int,int, int], crs, view_window:Window = None) -> Polygon:
+    """Create a Polygon object for the negative sample boundary (without saving).
+    
+    Returns:
+        Polygon object ready to be saved in batch.
+    """
     minx, miny, maxx, maxy = boundary.bounds
     
     # Calculate size in meters using boundary (which is created from view_window)
     size_m = calculate_bbox_size_meters(boundary.bounds, crs)
     
-    polygon = Polygon(
+    return Polygon(
         id = negative_id,
         class_id = CLASSES["ground"],
         area = area,
@@ -104,9 +114,6 @@ def save_boundary_as_geo(boundary:ShapelyPolygon, area:str, negative_id:int, img
         augmented_paths = [],
         polygon = boundary
     )
-    
-    # Save metadata
-    PolygonData.save_polygons([polygon])
 
 def save_boundary_image(src, boundary:Window, save_path:Path) -> tuple[int, int, int]:
     """
@@ -157,20 +164,28 @@ def extract_negatives_area(area: str) -> tuple[list[ShapelyPolygon], rasterio.Da
 
     tif_img = load_tif(tif_path)
     boundaries = get_all_polygon_boundaries(labels_path, tif_img.crs)
+    # Prepare boundaries for faster spatial checks using prepared geometry
+    prepared_boundaries = [prep(boundary) for boundary in boundaries]
+    
     save_boundaries = []
+    polygons_to_save = []  # Batch metadata saves
+    no_data_value = tif_img.nodata  # Cache nodata value
 
     while sampled < limit:
         view_window, boundary = sample_boundary(tif_img, area)
         # Check both polygon intersection and valid data presence
-        if not_overlapping(boundary, boundaries) and in_actual_data(tif_img, view_window):
+        if not_overlapping(boundary, prepared_boundaries) and in_actual_data(tif_img, view_window, no_data_value):
             sampled += 1
             print(tabbed(f"Sampled negative {sampled}/{limit} for area {area}"))
-            # Since areas are so big, there is a low probability of sampling a crop from the same area, speeds up code
-            # boundaries.append(boundary)
             save_boundaries.append(boundary)
             save_path = make_negative_path(area, sampled)
             img_shape = save_boundary_image(tif_img, view_window, save_path)
-            save_boundary_as_geo(boundary, area, sampled, save_path, img_shape, tif_img.crs, view_window)
+            polygon = _create_negative_polygon(boundary, area, sampled, save_path, img_shape, tif_img.crs, view_window)
+            polygons_to_save.append(polygon)
+
+    # Batch save all polygon metadata at once (single I/O operation instead of per-polygon)
+    if polygons_to_save:
+        PolygonData.save_polygons(polygons_to_save)
 
     return save_boundaries, tif_img
 
