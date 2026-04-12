@@ -13,7 +13,7 @@ from text import title
 from extract import extract_area
 from crop import crop_area
 from resize import resize_area
-from negatives import extract_negatives_area
+from negatives import extract_negatives_area_parallel, save_negatives_boundaries
 
 
 def parse_args():
@@ -61,7 +61,8 @@ def run_pipeline(area: str, steps: list) -> None:
     
     if "negatives" in steps:
         print(title("STEP 4: Extracting negatives"))
-        extract_negatives_area(area)
+        save_boundaries, area_tif = extract_negatives_area_parallel(area)
+        save_negatives_boundaries(save_boundaries, area, area_tif.crs)
     
     print(title(f"Pipeline complete for area: {area}"))
 

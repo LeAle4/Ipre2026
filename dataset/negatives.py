@@ -200,46 +200,6 @@ def extract_negatives_area_parallel(area:str) -> tuple[list[ShapelyPolygon], lis
 
     return all_boundaries, tif_img
 
-def extract_negatives_area(area: str) -> tuple[list[ShapelyPolygon], rasterio.DatasetReader]:
-    """Extract negative samples from polygon dataset for a single area.
-    
-    Args:
-        area: Study area to process (e.g., 'unita', 'chugchug', 'lluta').
-    """
-    sampled = 0
-    limit = _negatives_per_area(area)
-    print(title(f"Extracting negative samples for area: {area}, amount to sample: {limit}"))
-
-    # Load the area tif
-    tif_path = get_area_tif(area)
-    labels_path = get_area_labels(area)
-
-    tif_img = load_tif(tif_path)
-    boundaries = get_all_polygon_boundaries(labels_path, tif_img.crs)
-    # Prepare boundaries for faster spatial checks using prepared geometry
-    prepared_boundaries = [prep(boundary) for boundary in boundaries]
-    
-    save_boundaries = []
-    polygons_to_save = []  # Batch metadata saves
-    no_data_value = tif_img.nodata  # Cache nodata value
-
-    while sampled < limit:
-        view_window, boundary = sample_boundary(tif_img, area)
-        # Check both polygon intersection and valid data presence
-        if not_overlapping(boundary, prepared_boundaries) and in_actual_data(tif_img, view_window, no_data_value):
-            sampled += 1
-            save_boundaries.append(boundary)
-            save_path = make_negative_path(area, sampled)
-            img_shape = save_boundary_image(tif_img, view_window, save_path)
-            polygon = _create_negative_polygon(boundary, area, sampled, save_path, img_shape, tif_img.crs, view_window)
-            polygons_to_save.append(polygon)
-
-    # Batch save all polygon metadata at once (single I/O operation instead of per-polygon)
-    if polygons_to_save:
-        PolygonData.save_polygons(polygons_to_save)
-
-    return save_boundaries, tif_img
-
 def save_negatives_boundaries(boundaries:list[ShapelyPolygon], area:str, area_crs:str) -> None:
     """Save the negative sample boundaries as a GeoJSON file."""
     gdf = gpd.GeoDataFrame(geometry=boundaries, crs=area_crs)
