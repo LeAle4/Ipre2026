@@ -23,9 +23,9 @@ from PIL import Image, ImageDraw
 # Add parent directory to path to import project helpers
 UTLS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTLS_PATH))
-from handle import CLASSES, CLASS_IDS, POLYGON_DATA_DIR, PATHS, get_area_tif, get_area_labels
+from handle import ROOT, CLASSES, CLASS_IDS, PATHS, get_area_tif, get_area_labels, PolygonData, make_jpeg_path, make_overlay_path, make_tif_path
 from text import title
-from utils import Polygon as PolygonData, calculate_bbox_size_meters
+from utils import Polygon, calculate_bbox_size_meters
 
 # Create reverse mapping for class names
 CLASS_NAMES = {v: k for k, v in CLASSES.items()}
@@ -36,6 +36,8 @@ def save_tif(array, output_path: Path, transform, crs):
         array = array[np.newaxis, ...]
 
     count, height, width = array.shape
+    output_path = ROOT / output_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     with rasterio.open(
         str(output_path), 'w',
         driver='GTiff', height=height, width=width,
@@ -54,6 +56,8 @@ def save_jpeg(array, output_path: Path):
 
     mode = 'RGB' if len(array.shape) == 3 else 'L'
     img = Image.fromarray(array, mode=mode)
+    output_path = ROOT / output_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(output_path), 'JPEG', quality=95, optimize=True)
 
 
@@ -88,7 +92,8 @@ def save_overlay_jpeg(array, polygons, transform, output_path: Path):
                 for coord in poly.exterior.coords
             ]
             draw.line(pixel_coords, fill='yellow', width=3)
-    
+    output_path = ROOT / output_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(output_path), 'JPEG', quality=95, optimize=True)
 
 
@@ -131,13 +136,12 @@ def create_polygon_metadata(polygon_idx, geometry, polygon_class, ortho_chunk, b
     polygon_points = poly_to_coords(polygons[0])['exterior']
     
     # Create output paths
-    base_name = f"geoglif_{polygon_idx:04d}"
-    tif_path = output_dir / f"{base_name}_ortho.tif"
-    jpeg_path = output_dir / f"{base_name}_ortho.jpg"
-    overlay_path = output_dir / f"{base_name}_overlay.jpg"
+    tif_path = make_tif_path(area, polygon_idx, polygon_class)
+    jpeg_path = make_jpeg_path(area, polygon_idx, polygon_class)
+    overlay_path = make_overlay_path(area, polygon_idx, polygon_class)
     
     # Create metadata object
-    poly_obj = PolygonData()
+    poly_obj = Polygon()
     poly_obj.id = polygon_idx
     poly_obj.class_id = int(polygon_class)
     poly_obj.area = area
@@ -154,9 +158,7 @@ def create_polygon_metadata(polygon_idx, geometry, polygon_class, ortho_chunk, b
     poly_obj.augmented_paths = []
     
     # Save metadata
-    POLYGON_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    poly_obj.save_metadata(POLYGON_DATA_DIR)
-    
+    PolygonData.save_polygons([poly_obj])
     return tif_path, jpeg_path, overlay_path, polygons
 
 

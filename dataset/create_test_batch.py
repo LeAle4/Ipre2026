@@ -8,7 +8,7 @@ UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
 from utils import Polygon
-from handle import PATHS, CLASSES, NEGATIVES_RATIO, geos_from_polygon_data
+from handle import CLASSES, NEGATIVES_RATIO, PolygonData
 
 def sample_n_crops_from_area(geo_list: list[Polygon], n: int) -> list[Path]:
     """Randomly sample n crop paths from a list of Polygon objects.
@@ -68,10 +68,10 @@ def create_test_batch(areas: list[str], area_weights: list[float], positive_size
     for area in areas:
         print(f"Loading polygons from area: {area}")
         loaded_polygons[area] = {"positives": [], "negatives": []}
-        for geo in geos_from_polygon_data(area, classes_filter=(CLASSES["geo"],)):
+        for geo in PolygonData.polygons(area_filter=(area,), classes_filter=(CLASSES["geo"],)):
             loaded_polygons[area]["positives"].append(geo)
             print(f"Loaded {len(loaded_polygons[area]['positives'])} positive polygons from area: {area}")
-        for geo in geos_from_polygon_data(area, classes_filter=(CLASSES["ground"],)):
+        for geo in PolygonData.polygons(area_filter=(area,), classes_filter=(CLASSES["ground"],)):
             loaded_polygons[area]["negatives"].append(geo)
             print(f"Loaded {len(loaded_polygons[area]['negatives'])} negative polygons from area: {area}")
 

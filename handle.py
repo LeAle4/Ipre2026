@@ -1,4 +1,5 @@
 # Core imports
+import json
 from pathlib import Path
 from typing import Generator
 
@@ -9,9 +10,9 @@ from utils import Polygon
 
 
 # Project directory structure
-PROJECT_PATH = Path(__file__).resolve().parent
-DATA_DIR = PROJECT_PATH / "data"
-POLYGON_DATA_DIR = DATA_DIR / "polygon_data"
+ROOT = Path(__file__).resolve().parent
+DATA_DIR = ROOT / "data"
+POLYGON_DATA_FILE = DATA_DIR / "polygon_data.json"
 
 # Path mappings for Unita study area
 UNITA_PATHS = {
@@ -67,6 +68,99 @@ STRIDE = int(WINDOW_SIZE / 2)
 THRESHOLD_CROP_CONTENT = 0.8  # Minimum fraction of geoglyph pixels in a crop to be considered valid
 NEGATIVES_RATIO = 3 # Number of negative samples per positive sample
 
+class PolygonData:
+    dir = DATA_DIR
+    polygon_data_file = POLYGON_DATA_FILE
+
+    if not polygon_data_file.exists():
+        polygon_data_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(polygon_data_file, "w") as f:
+            json.dump({}, f)
+
+    @classmethod
+    def polygons(cls, area_filter: tuple[str, ...], classes_filter: tuple[int, ...]) -> Generator[Polygon, None, None]:
+        """Generator yielding Polygon objects from polygon data directory.
+        """
+        with open(cls.polygon_data_file, "r") as f:
+            polygon_data_dict = json.load(f)
+
+            for area in area_filter:
+                if area not in polygon_data_dict:
+                    raise ValueError(f"Area '{area}' not found in polygon data.")
+                for class_id in classes_filter:
+                    class_key = str(class_id)
+                    if class_key not in polygon_data_dict[area]:
+                        raise ValueError(f"Class ID '{class_id}' not found in area '{area}' polygon data.")
+                    for polygon_info in polygon_data_dict[area][class_key].values():
+                        yield Polygon().load_from_metadata(polygon_info)
+
+    @classmethod
+    def crops_in_area(cls, area:str) -> int:
+        """Count the number of crop files in the specified study area.
+        
+        Args:
+            area: Study area name (e.g., 'unita', 'chugchug', 'lluta').
+        """
+        return len(tuple(cls.polygons(area_filter=(area,), classes_filter=(CLASSES["geo"],))))
+
+    @classmethod
+    def positive_count(cls, areas:tuple[str, ...]) -> int:
+        """Count the total number of positive samples (geoglyphs) across specified areas.
+        
+        Args:
+            areas: Tuple of study area names to include in the count.
+        """
+        return sum(1 for _ in cls.polygons(area_filter=areas, classes_filter=(CLASSES["geo"],)))
+
+    @classmethod
+    def negative_count(cls, areas:tuple[str, ...]) -> int:
+        """Calculate the total number of negative samples based on the positive count and defined ratio.
+        
+        Args:
+            areas: Tuple of study area names to include in the count.
+        """
+        return sum(1 for _ in cls.polygons(area_filter=areas, classes_filter=(CLASSES["ground"],)))
+
+    @classmethod
+    def save_polygon_metadata(cls, polygon_dict_list: list[dict]) -> None:
+        """Save a list of polygon metadata dictionaries to the polygon data JSON file.
+        
+        Args:
+            polygon_dict_list: List of dictionaries containing polygon metadata.
+        """
+        # Load existing data
+        if cls.polygon_data_file.exists():
+            with open(cls.polygon_data_file, "r") as f:
+                existing_data = json.load(f)
+        else:
+            existing_data = {}
+
+        # Update with new data
+        for polygon_metadata in polygon_dict_list:
+            area = polygon_metadata["area"]
+            id = polygon_metadata["id"]
+            class_id = polygon_metadata["class_id"]
+            class_key = str(class_id)
+            if area not in existing_data:
+                existing_data[area] = {str(id): {} for id in CLASS_IDS}
+            if class_key not in existing_data[area]:
+                existing_data[area][class_key] = {}
+            existing_data[area][class_key][id]=polygon_metadata
+
+        # Save updated data
+        with open(cls.polygon_data_file, "w") as f:
+            json.dump(existing_data, f, indent=4)
+
+    @classmethod
+    def save_polygons(cls, polygons: list[Polygon]) -> None:
+        """Save a list of Polygon objects to the polygon data JSON file.
+        
+        Args:
+            polygons: List of Polygon objects to save.
+        """
+        polygon_dict_list = [polygon.get_metadata() for polygon in polygons]
+        cls.save_polygon_metadata(polygon_dict_list)
+
 def get_area_tif(area:str) -> Path:
     """Get the path to the orthomosaic GeoTIFF for the specified study area.
     
@@ -85,36 +179,54 @@ def get_area_labels(area:str) -> Path:
     geojson_file = raw_path.glob("*.gpkg")
     return next(geojson_file)
 
-def _polygons_from_polygon_data(area_filter: tuple[str, ...], classes_filter: tuple[int, ...]) -> Generator[Polygon, None, None]:
-    """Generator yielding Polygon objects from polygon data directory.
-    """
-    for metadata_file in POLYGON_DATA_DIR.glob("*_metadata.json"):
-        polygon = Polygon().load_from_metadata(metadata_file)
-        if polygon.class_id in classes_filter and polygon.area in area_filter:
-            yield polygon
-
-def geos_from_polygon_data(area, classes_filter = (CLASSES["geo"],)) -> Generator[Polygon, None, None]:
-    """Generator yielding Polygon objects from polygon data directory, filtered by area and class.
-    Args:
-        area_filter: Tuple of area names to include (e.g., ('unita', 'chugchug')).
-        class_filter: Tuple of class IDs to include (default: (1,) for geoglyphs).
-    """
-    yield from _polygons_from_polygon_data(area_filter=(area,), classes_filter=classes_filter)
-
-def negatives_from_polygon_data(area) -> Generator[Polygon, None, None]:
-    """Generator yielding negative sample Polygon objects from polygon data directory, filtered by area.
-    Args:
-        area_filter: Tuple of area names to include (e.g., ('unita', 'chugchug')).
-    """
-    yield from _polygons_from_polygon_data(area_filter=(area,), classes_filter=(CLASSES["ground"],))
-
 def load_img_array_from_path(path:Path) -> np.ndarray:
     """Load a GeoTIFF image from the given path and return as a NumPy array.
     
     Args:
         tif_path: Path to the GeoTIFF file.
     """
-    return np.array(Image.open(path))
+    candidate_path = Path(path)
+    resolved_path = ROOT / candidate_path
+    return np.array(Image.open(resolved_path))
+
+def make_jpeg_path(area, geo_id, class_id) -> Path:
+    """Construct the path for the JPEG version of a polygon image.
+    
+    Args:
+        area: Study area name.
+        geo_id: Unique identifier for the geoglyph.
+        class_id: Class ID of the polygon (e.g., 1 for geoglyph).
+    """
+    jpeg_dir = PATHS[area]["polygons"]
+    jpeg_dir.mkdir(parents=True, exist_ok=True)
+    relative_jpeg_dir = jpeg_dir.relative_to(ROOT)
+    return relative_jpeg_dir / f"{area}_class{class_id}_{geo_id}_ortho.jpg"
+
+def make_tif_path(area, geo_id, class_id) -> Path:
+    """Construct the path for the GeoTIFF version of a polygon image.
+    
+    Args:
+        area: Study area name.
+        geo_id: Unique identifier for the geoglyph.
+        class_id: Class ID of the polygon (e.g., 1 for geoglyph).
+    """
+    tif_dir = PATHS[area]["polygons"]
+    tif_dir.mkdir(parents=True, exist_ok=True)
+    relative_tif_dir = tif_dir.relative_to(ROOT)
+    return relative_tif_dir / f"{area}_class{class_id}_{geo_id}_ortho.tif"
+
+def make_overlay_path(area, geo_id, class_id) -> Path:
+    """Construct the path for the overlay image of a polygon.
+    
+    Args:
+        area: Study area name.
+        geo_id: Unique identifier for the geoglyph.
+        class_id: Class ID of the polygon (e.g., 1 for geoglyph).
+    """
+    overlay_dir = PATHS[area]["polygons"]
+    overlay_dir.mkdir(parents=True, exist_ok=True)
+    relative_overlay_dir = overlay_dir.relative_to(ROOT)
+    return relative_overlay_dir / f"{area}_class{class_id}_{geo_id}_overlay.jpg"
 
 def make_resized_path(geo:Polygon, area:str) -> Path:
     """Construct the path for the resized polygon image.
@@ -124,7 +236,8 @@ def make_resized_path(geo:Polygon, area:str) -> Path:
     """
     resized_dir = PATHS[area]["resized"]
     resized_dir.mkdir(parents=True, exist_ok=True)
-    return resized_dir / f"{geo.area}_class{geo.class_id}_{geo.id}_resized.png"
+    relative_resized_dir = resized_dir.relative_to(ROOT)
+    return relative_resized_dir / f"{geo.area}_class{geo.class_id}_{geo.id}_resized.png"
 
 def make_crop_path(geo:Polygon, area:str, crop_id:int) -> Path:
     """Construct the path for a specific crop of the polygon image.
@@ -135,7 +248,8 @@ def make_crop_path(geo:Polygon, area:str, crop_id:int) -> Path:
     """
     crop_dir = PATHS[area]["crops"] / f"geo_{geo.id}"
     crop_dir.mkdir(parents=True, exist_ok=True)
-    return crop_dir / f"{geo.area}_class{geo.class_id}_{geo.id}_crop{crop_id}.png"
+    relative_crop_dir = crop_dir.relative_to(ROOT)
+    return relative_crop_dir / f"{geo.area}_class{geo.class_id}_{geo.id}_crop{crop_id}.png"
 
 def make_negative_path(area:str, negative_id:int) -> Path:
     """Construct the path for a negative sample image.
@@ -146,14 +260,5 @@ def make_negative_path(area:str, negative_id:int) -> Path:
     """
     negative_dir = PATHS[area]["negatives"]
     negative_dir.mkdir(parents=True, exist_ok=True)
-    return negative_dir / f"{area}_class{CLASSES['ground']}_crop{negative_id}_0.png"
-
-def crops_in_area(area:str) -> int:
-    """Count the number of crop files in the specified study area.
-    
-    Args:
-        area: Study area name (e.g., 'unita', 'chugchug', 'lluta').
-    """
-    crop_dir = PATHS[area]["crops"]
-    crop_files = [f for f in crop_dir.rglob("*.png") if "negatives" not in f.parts]
-    return len(crop_files)
+    relative_negative_dir = negative_dir.relative_to(ROOT)
+    return relative_negative_dir / f"{area}_class{CLASSES['ground']}_crop{negative_id}.png"

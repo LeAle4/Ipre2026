@@ -1,27 +1,5 @@
 #Raw files that weight too much to be uploaded to GitHub
-data/chugchug_raw
-data/lluta_raw
-data/unita_raw
-data/salvador_raw
-data/granllama_raw
-
-data/chugchug_polygons
-data/lluta_polygons
-data/unita_polygons
-
-data/unita_resized
-data/chugchug_resized
-data/lluta_resized
-
-data/unita_crops
-data/chugchug_crops
-data/lluta_crops
-
-data/unita_negatives
-data/chugchug_negatives
-data/lluta_negatives
-
-data/polygon_data
+data/*
 
 #Python cache files
 __pycache__/

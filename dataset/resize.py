@@ -10,7 +10,7 @@ from pathlib import Path
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from handle import SCALES, load_img_array_from_path, POLYGON_DATA_DIR, make_resized_path, geos_from_polygon_data
+from handle import ROOT, DATA_DIR, SCALES, load_img_array_from_path, make_resized_path, PolygonData, CLASSES
 from text import title, tabbed
 from utils import Polygon
 
@@ -129,8 +129,10 @@ def save_resized_polygon(geo:Polygon, resized_array:np.ndarray, save_path:Path) 
     # Save resized image
     img = Image.fromarray(resized_array)
     geo.resized_path = save_path
-    geo.save_metadata(POLYGON_DATA_DIR)
-    img.save(save_path)
+    PolygonData.save_polygons([geo])
+    output_path = ROOT / save_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(output_path)
 
 """Code for use in the command line to resize polygon images to a standard size."""
 def parse_arguments():
@@ -152,7 +154,7 @@ def resize_area(area: str) -> None:
         area: Study area to process (e.g., 'unita', 'chugchug', 'lluta').
     """
     print(title(f"Resizing polygons in area: {area}"))
-    geos = geos_from_polygon_data(area)
+    geos = PolygonData.polygons(area_filter = (area,), classes_filter=(CLASSES["geo"],))
     for geo in geos:
         print(f"Resizing polygon ID {geo.id}...")
         resized_array = resize_polygon(geo, scale=SCALES[area])
@@ -164,6 +166,6 @@ if __name__ == "__main__":
     args = parse_arguments()
     areas = args.area
 
-    POLYGON_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     for area in areas:
         resize_area(area)
