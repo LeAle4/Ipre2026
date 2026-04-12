@@ -82,6 +82,10 @@ class Polygon:
 
         return metadata
 
+    def num_crops(self) -> int:
+        """Return the number of crop paths associated with this polygon."""
+        return len(self.crop_paths)
+
 def calculate_bbox_size_meters(bounds, crs):
     """Calculate the size of a bounding box in meters."""
     minx, miny, maxx, maxy = bounds

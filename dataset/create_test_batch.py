@@ -8,7 +8,19 @@ UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
 from utils import Polygon
-from handle import CLASSES, NEGATIVES_RATIO, PolygonData
+from handle import CLASSES, NEGATIVES_RATIO, PolygonData, ROOT
+
+def calculate_proportional_weights(areas: list[str]) -> list[float]:
+    """Calculate proportional weights for each area based on the number of positive samples.
+    Args:
+        areas: List of area names.
+        loaded_polygons: Dictionary containing loaded polygons for each area and class.
+    Returns:
+        List of proportional weights for each area."""
+    
+    positive_counts = [PolygonData.crops_in_area(area) for area in areas]
+    total_positives = sum(positive_counts)
+    return [count / total_positives for count in positive_counts]
 
 def sample_n_crops_from_area(geo_list: list[Polygon], n: int) -> list[Path]:
     """Randomly sample n crop paths from a list of Polygon objects.
@@ -26,31 +38,37 @@ def sample_n_crops_from_area(geo_list: list[Polygon], n: int) -> list[Path]:
             crop_path = random.choice(geo.crop_paths)
             if crop_path not in crop_list:
                 crop_list.append(crop_path)
+                print(f"Selected positive path: {crop_path}, [{len(crop_list)}/{n}]")
+            else:
+                geo_list[geo_list.index(geo)].crop_paths.remove(crop_path)  # Remove the crop path to avoid resampling
         else:
             geo_list.remove(geo)  # Remove the polygon to avoid resampling
     
     return crop_list
 
-def sample_n_negatives_from_area(geo_list: list[Polygon], n: int) -> list[Path]:
+def sample_n_negatives_from_area(negative_list: list[Polygon], n: int) -> list[Path]:
     """Randomly sample n crop paths from a list of Polygon objects.
     
     Args:
-        geo_list: List of Polygon objects to sample from.
+        negative_list: List of Polygon objects to sample from.
         n: Number of crop paths to sample.
     Returns:
         List of sampled crop paths.
     """
-    negative_list = []
-    while len(negative_list) < n and geo_list:
-        geo = random.choice(geo_list)
+    sampled_list = []
+    while len(sampled_list) < n and negative_list:
+        geo = random.choice(negative_list)
         if geo.crop_paths:
             crop_path = random.choice(geo.crop_paths)
-            if crop_path not in negative_list:
-                negative_list.append(crop_path)
+            if crop_path not in sampled_list:
+                sampled_list.append(crop_path)
+                print(f"Selected negative path: {crop_path}, [{len(sampled_list)}/{n}]")
+            else:
+                negative_list[negative_list.index(geo)].crop_paths.remove(crop_path)  # Remove the crop path to avoid resampling
         else:
-            geo_list.remove(geo)  # Remove the polygon to avoid resampling
+            negative_list.remove(geo)  # Remove the polygon to avoid resampling
     
-    return negative_list
+    return sampled_list
 
 def create_test_batch(areas: list[str], area_weights: list[float], positive_size: int, negatives_ratio: float = NEGATIVES_RATIO) -> dict[str, dict[str, list[Path]]]:
     """Create a test batch of geoglyph crops from the specified areas.
@@ -77,15 +95,21 @@ def create_test_batch(areas: list[str], area_weights: list[float], positive_size
 
     #Calculate the number of samples to draw from each area based on the weights
     negative_size = int(positive_size * negatives_ratio)
+    if area_weights is None:
+        area_weights = calculate_proportional_weights(areas)
     total_weight = sum(area_weights)
+    print(f"Calculated area weights: {area_weights}")
 
     selected_crops = {}
     for area, weight in zip(areas, area_weights):
         selected_crops[area] = {"positives": [], "negatives": []}
         num_positives = int(weight * positive_size / total_weight)
         num_negatives = int(weight * negative_size / total_weight)
+        print(f"Sampling {num_positives} positive crops and {num_negatives} negative crops from area: {area}")
         selected_crops[area]["positives"] = sample_n_crops_from_area(loaded_polygons[area]["positives"], num_positives)
+        print(f"Selected {len(selected_crops[area]['positives'])} positive crops from area: {area}")
         selected_crops[area]["negatives"] = sample_n_negatives_from_area(loaded_polygons[area]["negatives"], num_negatives)
+        print(f"Selected {len(selected_crops[area]['negatives'])} negative crops from area: {area}")
 
     return selected_crops
 
@@ -103,7 +127,7 @@ def save_test_batch(selected_polygons: dict[str, dict[str, list[Path]]], save_pa
             class_path.mkdir(parents=True, exist_ok=True)
             for crop_path in crop_paths:
                 destination = class_path / crop_path.name
-                shutil.copy(crop_path, destination)
+                shutil.copy(ROOT / crop_path, destination)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Generates a batch of sample images from the dataset.")
@@ -120,13 +144,13 @@ def parse_arguments():
         type=float,
         nargs="+",
         default=None,
-        help="Weights for each area when sampling. If omitted, equal weights are used.",
+        help="Weights for each area when sampling. If omitted, the weights are proportional to how many crop images are in each area (not how many geogliphs are).",
     )
     parser.add_argument(
         "--negatives_ratio",
         type=float,
         default=NEGATIVES_RATIO,
-        help="Ratio of negative samples to positive samples in the batch (default: 1.0).",
+        help=f"Ratio of negative samples to positive samples in the batch (default: {NEGATIVES_RATIO}).",
     )
     parser.add_argument(
         "--batch_size",
@@ -137,8 +161,8 @@ def parse_arguments():
     parser.add_argument(
         "--save_path",
         type=str,
-        default="test_batch",
-        help="Directory where sampled crops are copied (default: 'test_batch').",
+        default=None,
+        help="Directory where sampled crops are copied (default: 'test_batch_<batch_size>_<seed>').",
     )
     parser.add_argument(
         "--seed",
@@ -153,24 +177,21 @@ if __name__ == "__main__":
     if args.seed is not None:
         random.seed(args.seed)
         print(f"Using global random seed: {args.seed}")
-
-    if args.area_weights is None:
-        area_weights = [1.0] * len(args.areas)
     else:
-        area_weights = args.area_weights
-
-    if len(area_weights) != len(args.areas):
-        raise ValueError(
-            f"Expected {len(args.areas)} area weights for areas {args.areas}, got {len(area_weights)}."
-        )
-
-    output_dir = Path(args.save_path).resolve()
-    print(f"Saving test batch to: {output_dir}")
+        seed = random.randint(0, 1000000)
+        random.seed(seed)
+        print(f"No global random seed provided, using {seed}.")
 
     selected_crops = create_test_batch(
         areas=args.areas,
-        area_weights=area_weights,
+        area_weights=args.area_weights,
         positive_size=args.batch_size,
         negatives_ratio=args.negatives_ratio
     )
+
+    if args.save_path is None:
+        output_dir = Path(f"test_batch_{args.batch_size}_{seed}")
+    else:        
+        output_dir = Path(args.save_path)
+    print(f"Saving test batch to: {output_dir}")
     save_test_batch(selected_crops, output_dir)
