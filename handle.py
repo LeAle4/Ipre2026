@@ -101,8 +101,8 @@ class PolygonData:
         Args:
             area: Study area name (e.g., 'unita', 'chugchug', 'lluta').
         """
-        return len(tuple(cls.polygons(area_filter=(area,), classes_filter=(CLASSES["geo"],))))
-
+        return sum(polygon.num_crops() for polygon in cls.polygons(area_filter=(area,), classes_filter=(CLASSES["geo"],)))
+        
     @classmethod
     def positive_count(cls, areas:tuple[str, ...]) -> int:
         """Count the total number of positive samples (geoglyphs) across specified areas.
