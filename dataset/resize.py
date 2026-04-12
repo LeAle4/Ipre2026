@@ -10,7 +10,7 @@ from pathlib import Path
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from handle import ROOT, DATA_DIR, SCALES, load_img_array_from_path, make_resized_path, PolygonData, CLASSES
+from handle import ROOT, DATA_DIR, SCALE_FACTORS, load_img_array_from_path, make_resized_path, PolygonData, CLASSES
 from text import title, tabbed
 from utils import Polygon
 
@@ -157,7 +157,7 @@ def resize_area(area: str) -> None:
     geos = PolygonData.polygons(area_filter = (area,), classes_filter=(CLASSES["geo"],))
     for geo in geos:
         print(f"Resizing polygon ID {geo.id}...")
-        resized_array = resize_polygon(geo, scale=SCALES[area])
+        resized_array = resize_polygon(geo, scale=SCALE_FACTORS[area])
         save_path = make_resized_path(geo, area)
         save_resized_polygon(geo, resized_array, save_path)
 
