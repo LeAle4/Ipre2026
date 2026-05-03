@@ -280,6 +280,8 @@ def save_data(area, polygons: tuple[Polygon], geometries: dict[str, shapely.geom
         poly.tif_path = tif_path
         poly.jpeg_path = jpeg_path
         poly.overlay_path = overlay_path
+
+        PolygonData.save_polygons([poly])
         
         # Save images
         save_tif(geom["chunk"], tif_path, geom["transform"], geom["crs"])
