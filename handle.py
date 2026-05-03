@@ -277,7 +277,7 @@ def make_resized_path(geo:Polygon, area:str) -> Path:
     resized_dir = PATHS[area]["resized"]
     resized_dir.mkdir(parents=True, exist_ok=True)
     relative_resized_dir = resized_dir.relative_to(ROOT)
-    return relative_resized_dir / f"{geo.area}_class{geo.class_id}_{geo.id}_resized.png"
+    return relative_resized_dir / f"{geo.area}_class{geo.class_id}_{geo.id}_resized.tif"
 
 def make_crop_path(geo:Polygon, area:str, crop_id:int) -> Path:
     """Construct the path for a specific crop of the polygon image.

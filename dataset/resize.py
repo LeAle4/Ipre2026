@@ -1,6 +1,8 @@
 import argparse
 import sys
 import numpy as np
+import rasterio
+from rasterio.transform import Affine
     
 from PIL import Image
 from scipy.fft import idct
@@ -99,17 +101,18 @@ def lci(I_in, *args):
 
     return I_fin
 
-def resize_polygon(polygon:Polygon, scale:float) -> np.ndarray:
+
+def resize_polygon(polygon:Polygon, img_array:np.ndarray, scale:float) -> np.ndarray:
     """Resize the polygon's JPEG image to the target size using LCI.
     
     Args:
         polygon: Polygon object with image paths.
+        img_array: The image array to resize.
         scale: Scale factor to resize the image.
         
     Returns:
         Resized image as a NumPy array.
     """
-    img_array = load_img_array_from_path(polygon.tif_path)
     print(tabbed(f"Original shape: {img_array.shape}, resizing with scale {scale}"))
     
     resized_array = lci(img_array, scale)
@@ -118,7 +121,7 @@ def resize_polygon(polygon:Polygon, scale:float) -> np.ndarray:
     polygon.shape = resized_array.shape[:2]
     return resized_array
 
-def save_resized_polygon(geo:Polygon, resized_array:np.ndarray, save_path:Path) -> None:
+def save_resized_polygon(geo:Polygon, resized_array:np.ndarray, save_path:Path) -> Polygon:
     """Save the resized polygon image as a GeoTIFF with adjusted georeferencing.
     
     Args:
@@ -126,13 +129,44 @@ def save_resized_polygon(geo:Polygon, resized_array:np.ndarray, save_path:Path) 
         resized_array: Resized image array.
         save_path: Path to save the GeoTIFF file.
     """
-    # Save resized image
-    img = Image.fromarray(resized_array)
+    scale = SCALE_FACTORS[geo.area]
+    
     geo.resized_path = save_path
-    PolygonData.save_polygons([geo])
     output_path = ROOT / save_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    img.save(output_path)
+    
+    with rasterio.open(ROOT / geo.tif_path) as src:
+        crs = src.crs
+        original_transform = src.transform
+        
+    # Adjust transform scale based on resized dimensions
+    new_transform = original_transform * Affine.scale(1 / scale, 1 / scale)
+
+    # Transpose array from (H, W, C) to (C, H, W) for rasterio
+    if len(resized_array.shape) == 2:
+        count = 1
+        raster_data = resized_array[np.newaxis, ...]
+    else:
+        count = resized_array.shape[2]
+        raster_data = resized_array.transpose(2, 0, 1)
+        
+    height, width = resized_array.shape[:2]
+
+    # Save resized geo-referenced image
+    with rasterio.open(
+        str(output_path),
+        'w',
+        driver='GTiff',
+        height=height,
+        width=width,
+        count=count,
+        dtype=resized_array.dtype,
+        crs=crs,
+        transform=new_transform,
+    ) as dst:
+        dst.write(raster_data)
+
+    return geo
 
 """Code for use in the command line to resize polygon images to a standard size."""
 def parse_arguments():
@@ -147,25 +181,48 @@ def parse_arguments():
     )
     return parser.parse_args()
 
-def resize_area(area: str) -> None:
+def resize_area(area: str):
     """Resize polygon images to a standard size for a single area.
     
     Args:
         area: Study area to process (e.g., 'unita', 'chugchug', 'lluta').
     """
     print(title(f"Resizing polygons in area: {area}"))
-    geos = PolygonData.polygons(area_filter = (area,), classes_filter=(CLASSES["geo"],))
+    geos = list(PolygonData.polygons(area_filter=(area,), classes_filter=(CLASSES["geo"],)))
+    resized_arrays = []
     for geo in geos:
         print(f"Resizing polygon ID {geo.id}...")
-        resized_array = resize_polygon(geo, scale=SCALE_FACTORS[area])
+        img_array = load_img_array_from_path(geo.tif_path)
+        resized_array = resize_polygon(geo, img_array, scale=SCALE_FACTORS[area])
+        resized_arrays.append(resized_array)
+        
+    return geos, resized_arrays
+
+def save_data(area: str, polygons, resized_arrays) -> None:
+    """Save resized polygon images for a single area.
+    
+    Args:
+        area: Study area to process (e.g., 'unita', 'chugchug', 'lluta').
+        polygons: List of polygon objects.
+        resized_arrays: List of resized image arrays.
+    """
+    modified_polygons = []
+    for geo, resized_array in zip(polygons, resized_arrays):
+        print(f"Saving resized polygon ID {geo.id}...")
         save_path = make_resized_path(geo, area)
-        save_resized_polygon(geo, resized_array, save_path)
+        modified_polygon = save_resized_polygon(geo, resized_array, save_path)
+        modified_polygons.append(modified_polygon)
 
+    PolygonData.save_polygons(modified_polygons)  # Save updated metadata with resized paths
 
-if __name__ == "__main__":
+def main():
     args = parse_arguments()
     areas = args.area
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     for area in areas:
-        resize_area(area)
+        geos, resized_arrays = resize_area(area)
+        save_data(area, geos, resized_arrays)
+
+if __name__ == "__main__":
+    main()
