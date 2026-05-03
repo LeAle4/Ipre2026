@@ -9,6 +9,7 @@ For each polygon, creates:
 """
 import sys
 import argparse
+import math
 from pathlib import Path
 
 import geopandas as gpd
@@ -23,12 +24,12 @@ from PIL import Image, ImageDraw
 # Add parent directory to path to import project helpers
 UTLS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTLS_PATH))
-from handle import ROOT, CLASSES, CLASS_IDS, PATHS, get_area_tif, get_area_labels, PolygonData, make_jpeg_path, make_overlay_path, make_tif_path
+from handle import ROOT, CLASSES, CLASS_IDS, PATHS, SCALE_FACTORS, WINDOW_SIZE, get_area_tif, get_area_labels, PolygonData, make_jpeg_path, make_overlay_path, make_tif_path
 from text import title
 from utils import Polygon, calculate_bbox_size_meters
 
 # Create reverse mapping for class names
-CLASS_NAMES = {v: k for k, v in CLASSES.items()}
+IDS_TO_NAMES = {v: k for k, v in CLASSES.items()}
 
 def save_tif(array, output_path: Path, transform, crs):
     """Save numpy array as georeferenced TIF."""
@@ -106,18 +107,44 @@ def poly_to_coords(poly: Polygon):
     interiors = [to_xy(interior.coords) for interior in poly.interiors]
     return {'exterior': exterior, 'interiors': interiors}
 
+def round_up_to_multiple(value: int, multiple: int) -> int:
+        return ((value + multiple - 1) // multiple) * multiple
 
-def read_ortho_window(ortho_path: Path, bounds, pad_factor=0.0):
+def read_ortho_window(area: str, ortho_path: Path, bounds):
     """Read a window from orthomosaic based on bounds."""
     minx, miny, maxx, maxy = bounds
     
     with rasterio.open(str(ortho_path)) as ortho:
-        if pad_factor > 0:
-            pad = max(maxx - minx, maxy - miny) * pad_factor
-            minx, miny, maxx, maxy = minx - pad, miny - pad, maxx + pad, maxy + pad
-        
+
         row_min, col_min = ortho.index(minx, maxy)
         row_max, col_max = ortho.index(maxx, miny)
+
+        #We do the following procedure to ensure that when we scale later, we have enough pixels for the view window, so as to avoid noise padding
+        width = col_max - col_min
+        height = row_max - row_min
+
+        #We compare our current size with the target size, and if it's smaller than window size, we expand the window while keeping the center fixed
+        target_width = int(math.ceil(round_up_to_multiple(width * SCALE_FACTORS[area], WINDOW_SIZE) / SCALE_FACTORS[area]))
+        target_height = int(math.ceil(round_up_to_multiple(height * SCALE_FACTORS[area], WINDOW_SIZE) / SCALE_FACTORS[area]))
+
+        dw = int((target_width - width) / 2)
+        dh = int((target_height - height) / 2)
+
+        col_min = max(col_min - dw, 0)
+        col_max = min(col_max + dw, ortho.width)
+        row_min = max(row_min - dh, 0)
+        row_max = min(row_max + dh, ortho.height)
+
+        if col_max - col_min < target_width:
+            missing = target_width - (col_max - col_min)
+            col_min = max(col_min - missing, 0)
+            col_max = min(col_min + target_width, ortho.width)
+
+        if row_max - row_min < target_height:
+            missing = target_height - (row_max - row_min)
+            row_min = max(row_min - missing, 0)
+            row_max = min(row_min + target_height, ortho.height)
+
         window = Window.from_slices((row_min, row_max), (col_min, col_max))
         
         chunk = ortho.read(window=window)
@@ -146,9 +173,9 @@ def create_polygon_metadata(polygon_idx, geometry, polygon_class, ortho_chunk, b
     poly_obj.class_id = int(polygon_class)
     poly_obj.area = area
     poly_obj.polygon_points = polygon_points
-    poly_obj.shape = (ortho_chunk.shape[2], ortho_chunk.shape[1], ortho_chunk.shape[0])
+    poly_obj.shape = (ortho_chunk.shape[1], ortho_chunk.shape[2])
     poly_obj.size_m = bbox_size
-    poly_obj.coords = {'top': miny, 'left': minx, 'bottom': maxy, 'right': maxx}
+    poly_obj.coords = {'top': maxy, 'left': minx, 'bottom': miny, 'right': maxx}
     poly_obj.polygon = polygons[0]
     poly_obj.jpeg_path = jpeg_path
     poly_obj.tif_path = tif_path
@@ -165,10 +192,7 @@ def create_polygon_metadata(polygon_idx, geometry, polygon_class, ortho_chunk, b
 def extract_polygon_images(polygon_idx, geometry, gdf_crs, polygon_class, ortho_path: Path, output_dir: Path, area: str):
     """Extract and save images for a single polygon."""
     # Read ortho data for exact bounds
-    ortho_chunk, ortho_transform, ortho_crs = read_ortho_window(ortho_path, geometry.bounds)
-    
-    # Read ortho data with padding for overlay
-    overlay_chunk, overlay_transform, _ = read_ortho_window(ortho_path, geometry.bounds, pad_factor=0.05)
+    ortho_chunk, ortho_transform, ortho_crs = read_ortho_window(area, ortho_path, geometry.bounds)
     
     # Calculate size in meters
     bbox_size = calculate_bbox_size_meters(geometry.bounds, gdf_crs)
@@ -181,7 +205,7 @@ def extract_polygon_images(polygon_idx, geometry, gdf_crs, polygon_class, ortho_
     # Save images
     save_tif(ortho_chunk, tif_path, ortho_transform, ortho_crs)
     save_jpeg(ortho_chunk[:3].transpose(1, 2, 0), jpeg_path)
-    save_overlay_jpeg(overlay_chunk, polygons, overlay_transform, overlay_path)
+    save_overlay_jpeg(ortho_chunk, polygons, ortho_transform, overlay_path)
 
 
 def load_area_data(area):
@@ -253,7 +277,6 @@ Examples:
 
     return parser.parse_args()
 
-
 def main():
     args = parse_args()
     
@@ -279,7 +302,7 @@ def extract_area(area: str, limit: int = None, class_filter: int = CLASSES["geo"
     print(f"Loaded {len(gdf)} polygons")
     
     if class_filter is not None:
-        print(f"Filtering to class {class_filter} ({CLASS_NAMES.get(class_filter, 'unknown')})\n")
+        print(f"Filtering to class {class_filter} ({IDS_TO_NAMES.get(class_filter, 'unknown')})\n")
     
     # Process each polygon
     processed_count = 0
@@ -290,7 +313,7 @@ def extract_area(area: str, limit: int = None, class_filter: int = CLASSES["geo"
         if class_filter is not None and polygon_class != class_filter:
             continue
         
-        class_name = CLASS_NAMES.get(polygon_class, 'unknown')
+        class_name = IDS_TO_NAMES.get(polygon_class, 'unknown')
         print(f"Processing polygon {idx} (class: {polygon_class} - {class_name})...")
         
         extract_polygon_images(
@@ -301,11 +324,9 @@ def extract_area(area: str, limit: int = None, class_filter: int = CLASSES["geo"
     
     print(f"\nDone! Processed {processed_count} polygons for {area}")
 
-
 def process_area(area, args):
     """Process extraction for a single area."""
     extract_area(area, args.limit, args.class_filter)
-
 
 if __name__ == "__main__":
     main()

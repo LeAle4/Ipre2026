@@ -3,6 +3,8 @@ import argparse
 import sys
 
 import numpy as np
+import geopandas as gpd
+import rasterio
 
 from pathlib import Path
 from typing import Generator
@@ -13,9 +15,9 @@ from shapely.geometry import box
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from handle import ROOT, CLASSES, PolygonData, WINDOW_SIZE, STRIDE, THRESHOLD_CROP_CONTENT, make_crop_path, load_img_array_from_path
+from handle import ROOT, PATHS, CLASSES, PolygonData, WINDOW_SIZE, STRIDE, THRESHOLD_CROP_CONTENT, make_crop_path, load_img_array_from_path, get_area_tif
 from text import title, tabbed
-from utils import Polygon, pixels_to_coordinates
+from utils import Polygon
 
 def calculate_crop_proportion(geo:Polygon, crop_borders:tuple[float,float,float,float]) -> float:
     """Calculate the proportion of polygon area inside the crop.
@@ -28,57 +30,67 @@ def calculate_crop_proportion(geo:Polygon, crop_borders:tuple[float,float,float,
     crop_polygon = box(*crop_borders)
     intersection = crop_polygon.intersection(geo.polygon)
     crop_area = crop_polygon.area
+    if crop_area <= 0 or intersection.is_empty:
+        return 0.0
     return intersection.area / crop_area
 
-def valid_crop(geo:Polygon, crop_borders:tuple[float,float,float,float], threshold:float=THRESHOLD_CROP_CONTENT) -> bool:
-    """Determine if a crop contains sufficient geoglyph content to be considered valid.
-    Args:
-        geo: Polygon object containing the mask path.
-        crop_borders: Tuple of (minx, miny, maxx, maxy) borders of the crop in geographic coordinates.
-        threshold: Minimum fraction of geoglyph pixels in the crop to be considered valid.
-    """
-    return calculate_crop_proportion(geo, crop_borders) >= threshold
-
-def _calculate_crop_borders(i,j, geo:Polygon, window_size:int, stride: int) -> tuple[float,float,float,float]:
-    """Calculate the borders of a crop in the original image coordinates.
+def _calculate_crop_borders(i:int, j:int, geo:Polygon, window_size:int, stride:int) -> tuple[float,float,float,float]:
+    """Calculate crop borders in geographic coordinates from pixel window placement.
     
     Args:
         i: Row index of the crop.
         j: Column index of the crop.
-        geo: Polygon object containing the image shape and geotransform.
-        stride: Stride used for cropping."""
-    
-    top_left = pixels_to_coordinates(geo, (j * stride, i * stride))
-    bottom_right = pixels_to_coordinates(geo, (j * stride + window_size, i * stride + window_size))
-
-    return (top_left[0], top_left[1], bottom_right[0], bottom_right[1])  # (minx, miny, maxx, maxy)
-
-
-def pad_to_window_size(img_array:np.ndarray, window_size:int) -> np.ndarray:
-    """Pad the input image array to ensure both dimensions are at least window_size.
-    
-    Args:
-        img_array: Input image as a NumPy array.
-        window_size: Minimum size for each dimension.
-        
-    Returns:
-        Padded image as a NumPy array with dimensions at least (window_size, window_size, C).
+        geo: Polygon object containing bounds and image shape.
+        window_size: Crop size in pixels.
+        stride: Stride used for cropping.
     """
-    H, W, C = img_array.shape
-    
-    # Calculate target dimensions (at least window_size, but keep larger dimensions)
-    target_H = max(H, window_size)
-    target_W = max(W, window_size)
+    img_height, img_width = geo.shape[0], geo.shape[1]
 
-    # Create new array filled with random noise
-    padded_array = np.random.randint(0, 256, (target_H, target_W, C), dtype=img_array.dtype)
+    x0_px = j * stride
+    y0_px = i * stride
+    x1_px = min(x0_px + window_size, img_width)
+    y1_px = min(y0_px + window_size, img_height)
 
-    # Copy original image into the center
-    top = (target_H - H) // 2
-    left = (target_W - W) // 2
-    padded_array[top:top + H, left:left + W] = img_array
+    x_left = geo.coords["left"]
+    x_right = geo.coords["right"]
+    y_top = geo.coords["top"]
+    y_bottom = geo.coords["bottom"]
 
-    return padded_array
+    x_min = min(x_left, x_right)
+    x_max = max(x_left, x_right)
+    y_min = min(y_top, y_bottom)
+    y_max = max(y_top, y_bottom)
+
+    crop_minx = x_min + (x0_px / img_width) * (x_max - x_min)
+    crop_maxx = x_min + (x1_px / img_width) * (x_max - x_min)
+    crop_maxy = y_max - (y0_px / img_height) * (y_max - y_min)
+    crop_miny = y_max - (y1_px / img_height) * (y_max - y_min)
+
+    return (min(crop_minx, crop_maxx), min(crop_miny, crop_maxy),
+            max(crop_minx, crop_maxx), max(crop_miny, crop_maxy))
+
+def save_crop_boundaries_geojson(geo: Polygon, boundaries: list, rows: list[int], cols: list[int], proportions: list[float]) -> None:
+    """Persist evaluated crop boundaries to a GeoJSON file for analysis."""
+    output_dir = PATHS[geo.area]["crops"] / f"geo_{geo.id}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{geo.area}_class{geo.class_id}_{geo.id}_crop_boundaries.geojson"
+    area_tif = get_area_tif(geo.area)
+    with rasterio.open(area_tif) as src:
+        area_crs = src.crs
+
+    gdf = gpd.GeoDataFrame(
+        {
+            "polygon_id": int(geo.id),
+            "area": geo.area,
+            "class_id": int(geo.class_id),
+            "row": rows,
+            "col": cols,
+            "proportion": proportions,
+        },
+        geometry=boundaries,
+        crs=area_crs,
+    )
+    gdf.to_file(output_path, driver="GeoJSON")
 
 def make_crops(geo:Polygon, img_array:np.ndarray, crop_size:int, stride:int) -> Generator[np.ndarray, None, None]:
     """Generate crops from the input image array. Guarantees at least one crop per polygon.
@@ -88,37 +100,42 @@ def make_crops(geo:Polygon, img_array:np.ndarray, crop_size:int, stride:int) -> 
         crop_size: Size of each square crop.
         stride: Stride for moving the crop window.
     """
-    small = False
-    # If the image is smaller than the crop size, we add random noise to the borders so that the image can be passed to the network without resizing
-    if img_array.shape[0] < crop_size or img_array.shape[1] < crop_size:
-        padded_array = pad_to_window_size(img_array, crop_size)
-        #Crop is small and could bypass threshold, we mark it as such
-        small = True
-    else:
-        padded_array = img_array
-
-    view = view_as_windows(padded_array, (crop_size, crop_size, padded_array.shape[2]), step=stride)
+    print(tabbed(f"Image shape: {img_array.shape}, crop size: {crop_size}, stride: {stride}"))
+    view = view_as_windows(img_array, (crop_size, crop_size, img_array.shape[2]), step=stride)
 
     crop_count = 0
     best_crop = None
     best_proportion = 0.0
+    boundaries = []
+    rows = []
+    cols = []
+    proportions = []
     
     for i in range(view.shape[0]):
         for j in range(view.shape[1]):
             crop_borders = _calculate_crop_borders(i, j, geo, crop_size, stride)
             proportion = calculate_crop_proportion(geo, crop_borders)
+
+            minx, miny, maxx, maxy = crop_borders
+
+            boundaries.append(box(minx, miny, maxx, maxy))
+            rows.append(int(i))
+            cols.append(int(j))
+            proportions.append(float(proportion))
             
             if proportion > best_proportion:
                 best_proportion = proportion
                 best_crop = view[i, j, 0].copy()
             
-            if proportion >= THRESHOLD_CROP_CONTENT or small:
+            if proportion >= THRESHOLD_CROP_CONTENT:
                 yield view[i, j, 0]
                 crop_count += 1
     
     # If no crops were generated, yield the best one we found
-    if crop_count == 0 and best_crop is not None:
+    if crop_count == 0 and best_crop is not None and best_proportion > 0.0:
         yield best_crop
+
+    save_crop_boundaries_geojson(geo, boundaries, rows, cols, proportions)
 
 def get_polygon_crops(polygon:Polygon, crop_size:int=WINDOW_SIZE, stride:int=STRIDE) -> Generator[np.ndarray, None, None]:
     """Generate crops from the polygon's image.

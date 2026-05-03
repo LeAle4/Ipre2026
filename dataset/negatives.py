@@ -17,7 +17,7 @@ from PIL import Image
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from handle import ROOT, PATHS, NEGATIVES_RATIO, AREA_NAMES, CLASSES, WINDOW_SIZE, PolygonData, SCALES, get_area_tif, get_area_labels, make_negative_path
+from handle import ROOT, PATHS, NEGATIVES_RATIO, AREA_NAMES, CLASSES, SCALE_FACTORS, WINDOW_SIZE, PolygonData, get_area_tif, get_area_labels, make_negative_path
 from utils import Polygon, calculate_bbox_size_meters
 from text import title, tabbed
 from resize import lci
@@ -82,7 +82,7 @@ def sample_boundary(tif_area, area:str, window_size:int = WINDOW_SIZE) -> tuple[
         tif_area: Path to the tif file of the study area.
         window_size: Size of the square boundary to sample in pixels.
     """
-    window_size = int(window_size // SCALES[area])
+    window_size = int(window_size // SCALE_FACTORS[area])
     x,y = random.randint(0, tif_area.width - window_size), random.randint(0, tif_area.height - window_size)
     window = Window(x, y, window_size, window_size)
     bounds = tif_area.window_bounds(window)
