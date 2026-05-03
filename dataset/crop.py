@@ -161,6 +161,7 @@ def save_polygon_crop(geo, crop_array:np.ndarray, save_path:Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(output_path)
     geo.crop_paths.append(save_path)
+    return geo
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Generate crops from resized polygon images.")
@@ -186,9 +187,9 @@ def crop_area(area: str) -> None:
         for id, geo_crop in enumerate(get_polygon_crops(geo)):
             print(tabbed(f"Saving crop ID {id}..."))
             crop_path = make_crop_path(geo, area, id)
-            save_polygon_crop(geo, geo_crop, crop_path)
+            updated_geo = save_polygon_crop(geo, geo_crop, crop_path)
         
-        PolygonData.save_polygons([geo])
+        PolygonData.save_polygons([updated_geo])
 
 if __name__ == "__main__":
     args = parse_arguments()
