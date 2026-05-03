@@ -60,12 +60,16 @@ def run_pipeline(area: str, steps: list, savestop: list) -> None:
     geos = None
     img_arrays = None
     resized_arrays = None
+    transforms = None
+    crss = None
     
     if "extract" in steps:
         print(title("STEP 1: Extracting polygons"))
         geos, geometries = extract.extract_area(area)
         # Convert (C, H, W) to (H, W, C) for LCI and upcoming steps
         img_arrays = [geom["chunk"].transpose(1, 2, 0) for geom in geometries]
+        transforms = [geom["transform"] for geom in geometries]
+        crss = [geom["crs"] for geom in geometries]
         if "extract" in savestop:
             extract.save_data(area, geos, geometries)
     
@@ -73,29 +77,28 @@ def run_pipeline(area: str, steps: list, savestop: list) -> None:
         print(title("STEP 2: Resizing polygons"))
         resized_arrays = []
         resized_geos = []
-        for geo, img_array in zip(geos, img_arrays):
+        resized_transforms = []
+        for i, (geo, img_array) in enumerate(zip(geos, img_arrays)):
             print(f"Resizing polygon ID {geo.id}...")
             resized_array = resize.resize_polygon(geo, img_array, scale=resize.SCALE_FACTORS[area])
             resized_arrays.append(resized_array)
             resized_geos.append(geo)
+            if transforms is not None:
+                from rasterio.transform import Affine
+                scale = resize.SCALE_FACTORS[area]
+                resized_transforms.append(transforms[i] * Affine.scale(1 / scale, 1 / scale))
+
         if "resize" in savestop:
             resize.save_data(area, resized_geos, resized_arrays)
         
         geos = resized_geos
         img_arrays = resized_arrays
+        if resized_transforms:
+            transforms = resized_transforms
     
     if "crop" in steps:
         print(title("STEP 3: Generating crops"))
-        updated_geos = []
-        for geos, img_array in zip(geos, img_arrays):
-            print(f"Generating crops for polygon ID {geos.id}...")
-            for id, geo_crop in enumerate(crop.make_crops(geos, img_array, WINDOW_SIZE, STRIDE)):
-                print(f"Saving crop ID {id}...")
-                crop_path = crop.make_crop_path(geos, area, id)
-                updated_geo = crop.save_polygon_crop(geos, geo_crop, crop_path)
-                updated_geos.append(updated_geo)
-        
-        PolygonData.save_polygons(updated_geos)  # Save all updated metadata with crop paths
+        crop.crop_area(area, geos, img_arrays, transforms, crss)
     
     if "negatives" in steps:
         print(title("STEP 4: Extracting negatives"))

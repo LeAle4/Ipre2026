@@ -15,9 +15,9 @@ from shapely.geometry import box
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from handle import ROOT, PATHS, CLASSES, PolygonData, WINDOW_SIZE, STRIDE, THRESHOLD_CROP_CONTENT, make_crop_path, load_img_array_from_path, get_area_tif
+from handle import ROOT, PATHS, CLASSES, PolygonData, WINDOW_SIZE, STRIDE, THRESHOLD_CROP_CONTENT, make_crop_path, load_img_array_from_path, get_area_tif, SCALE_FACTORS
 from text import title, tabbed
-from utils import Polygon
+from utils import Polygon, save_georeferenced_tif
 
 def calculate_crop_proportion(geo:Polygon, crop_borders:tuple[float,float,float,float]) -> float:
     """Calculate the proportion of polygon area inside the crop.
@@ -92,7 +92,7 @@ def save_crop_boundaries_geojson(geo: Polygon, boundaries: list, rows: list[int]
     )
     gdf.to_file(output_path, driver="GeoJSON")
 
-def make_crops(geo:Polygon, img_array:np.ndarray, crop_size:int, stride:int) -> Generator[np.ndarray, None, None]:
+def make_crops(geo:Polygon, img_array:np.ndarray, crop_size:int, stride:int) -> Generator[tuple[np.ndarray, int, int], None, None]:
     """Generate crops from the input image array. Guarantees at least one crop per polygon.
     
     Args:
@@ -128,16 +128,14 @@ def make_crops(geo:Polygon, img_array:np.ndarray, crop_size:int, stride:int) -> 
                 best_crop = view[i, j, 0].copy()
             
             if proportion >= THRESHOLD_CROP_CONTENT:
-                yield view[i, j, 0]
+                yield view[i, j, 0], i, j
                 crop_count += 1
     
     # If no crops were generated, yield the best one we found
     if crop_count == 0 and best_crop is not None and best_proportion > 0.0:
-        yield best_crop
+        yield best_crop, -1, -1
 
-    save_crop_boundaries_geojson(geo, boundaries, rows, cols, proportions)
-
-def get_polygon_crops(polygon:Polygon, crop_size:int=WINDOW_SIZE, stride:int=STRIDE) -> Generator[np.ndarray, None, None]:
+def get_polygon_crops(polygon:Polygon, crop_size:int=WINDOW_SIZE, stride:int=STRIDE) -> Generator[tuple[np.ndarray, int, int], None, None]:
     """Generate crops from the polygon's image.
     
     Args:
@@ -148,18 +146,49 @@ def get_polygon_crops(polygon:Polygon, crop_size:int=WINDOW_SIZE, stride:int=STR
     img_array = load_img_array_from_path(polygon.resized_path)
     return make_crops(polygon, img_array, crop_size, stride)
 
-def save_polygon_crop(geo, crop_array:np.ndarray, save_path:Path) -> None:
-    """Save a crop array as an image.
+from rasterio.transform import Affine
+
+def save_polygon_crop(geo, crop_array:np.ndarray, save_path:Path, row:int, col:int, stride:int, original_transform=None, crs=None) -> Polygon:
+    """Save a crop array as a georeferenced TIFF image.
     
     Args:
         geo: Polygon object to update with the crop path.
         crop_array: Crop image as a NumPy array.
         save_path: Path to save the crop image.
+        row: Row index of the crop window.
+        col: Column index of the crop window.
+        stride: Stride of the crop window tracking.
+        original_transform: Optional manually provided transform.
+        crs: Optional manually provided CRS.
     """
-    img = Image.fromarray(crop_array)
     output_path = ROOT / save_path
+
+    # Adjust path extension to .tif
+    if output_path.suffix != '.tif':
+        output_path = output_path.with_suffix('.tif')
+        save_path = save_path.with_suffix('.tif')
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    img.save(output_path)
+    
+    if original_transform is None or crs is None:
+        if str(geo.resized_path) != '.' and (ROOT / geo.resized_path).is_file():
+            with rasterio.open(ROOT / geo.resized_path) as src:
+                crs = src.crs
+                original_transform = src.transform
+        else:
+            with rasterio.open(ROOT / geo.tif_path) as src:
+                crs = src.crs
+                base_transform = src.transform
+            scale = SCALE_FACTORS[geo.area]
+            original_transform = base_transform * Affine.scale(1 / scale, 1 / scale)
+        
+    x_offset = col * stride
+    y_offset = row * stride
+    
+    new_transform = original_transform * Affine.translation(x_offset, y_offset)
+
+    save_georeferenced_tif(crop_array, output_path, new_transform, crs)
+
     geo.crop_paths.append(save_path)
     return geo
 
@@ -175,19 +204,37 @@ def parse_arguments():
     )
     return parser.parse_args()
 
-def crop_area(area: str) -> None:
+def crop_area(area: str, geos=None, resized_arrays=None, transforms=None, crss=None) -> None:
     """Generate crops from resized polygon images for a single area.
     
     Args:
         area: Study area to process (e.g., 'unita', 'chugchug', 'lluta').
+        geos: Optional list of Polygon objects.
+        resized_arrays: Optional list of resized image arrays, matching `geos`.
+        transforms: Optional list of resized transforms.
+        crss: Optional list of CRSs.
     """
     print(title(f"Generating crops for polygons in area: {area}"))
-    for geo in PolygonData.polygons(area_filter = (area,), classes_filter=(CLASSES["geo"],)):
+    
+    if geos is None:
+        geos = list(PolygonData.polygons(area_filter=(area,), classes_filter=(CLASSES["geo"],)))
+
+    for i, geo in enumerate(geos):
         print(f"Generating crops for polygon ID {geo.id}...")
-        for id, geo_crop in enumerate(get_polygon_crops(geo)):
+        
+        orig_transform = transforms[i] if transforms else None
+        crs = crss[i] if crss else None
+
+        if resized_arrays is not None:
+            img_array = resized_arrays[i]
+            crop_generator = make_crops(geo, img_array, crop_size=WINDOW_SIZE, stride=STRIDE)
+        else:
+            crop_generator = get_polygon_crops(geo)
+            
+        for id, (geo_crop, row, col) in enumerate(crop_generator):
             print(tabbed(f"Saving crop ID {id}..."))
             crop_path = make_crop_path(geo, area, id)
-            updated_geo = save_polygon_crop(geo, geo_crop, crop_path)
+            updated_geo = save_polygon_crop(geo, geo_crop, crop_path, row, col, STRIDE, orig_transform, crs)
         
         PolygonData.save_polygons([updated_geo])
 

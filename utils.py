@@ -9,7 +9,55 @@ from typing import Optional
 from pathlib import Path
 from shapely.geometry import Point
 from shapely.ops import transform
+import rasterio
 from pyproj import Geod, Transformer
+import numpy as np
+
+def save_georeferenced_tif(array: np.ndarray, output_path: Path, transform, crs) -> None:
+    """Save a numpy array as a georeferenced TIF.
+    
+    Args:
+        array: Numpy array (H, W) or (H, W, C) or (C, H, W).
+        output_path: Path object to save the TIF file (absolute or relative to ROOT).
+        transform: Georeferencing transform (e.g. from rasterio / Affine).
+        crs: Coordinate Reference System.
+    """
+    # Ensure it's absolute
+    if not output_path.is_absolute():
+        from handle import ROOT
+        output_path = ROOT / output_path
+        
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Handle array shape (ensure C, H, W for rasterio)
+    if len(array.shape) == 2:
+        count = 1
+        raster_data = array[np.newaxis, ...]
+        height, width = array.shape
+    else:
+        # If the trailing dimension is small, assume it's (H, W, C)
+        if array.shape[2] <= 4:
+            count = array.shape[2]
+            raster_data = array.transpose(2, 0, 1)
+            height, width = array.shape[:2]
+        else:
+            # Assume it's already (C, H, W)
+            count = array.shape[0]
+            raster_data = array
+            height, width = array.shape[1:3]
+
+    with rasterio.open(
+        str(output_path),
+        'w',
+        driver='GTiff',
+        height=height,
+        width=width,
+        count=count,
+        dtype=array.dtype,
+        crs=crs,
+        transform=transform,
+    ) as dst:
+        dst.write(raster_data)
 
 class Polygon:
     """Represents a single polygon (geoglyph, ground, or road) from the dataset.

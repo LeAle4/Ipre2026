@@ -14,7 +14,7 @@ sys.path.append(str(UTILS_PATH))
 
 from handle import ROOT, DATA_DIR, SCALE_FACTORS, load_img_array_from_path, make_resized_path, PolygonData, CLASSES
 from text import title, tabbed
-from utils import Polygon
+from utils import Polygon, save_georeferenced_tif
 
 def lci(I_in, *args):
     """
@@ -142,29 +142,8 @@ def save_resized_polygon(geo:Polygon, resized_array:np.ndarray, save_path:Path) 
     # Adjust transform scale based on resized dimensions
     new_transform = original_transform * Affine.scale(1 / scale, 1 / scale)
 
-    # Transpose array from (H, W, C) to (C, H, W) for rasterio
-    if len(resized_array.shape) == 2:
-        count = 1
-        raster_data = resized_array[np.newaxis, ...]
-    else:
-        count = resized_array.shape[2]
-        raster_data = resized_array.transpose(2, 0, 1)
-        
-    height, width = resized_array.shape[:2]
-
     # Save resized geo-referenced image
-    with rasterio.open(
-        str(output_path),
-        'w',
-        driver='GTiff',
-        height=height,
-        width=width,
-        count=count,
-        dtype=resized_array.dtype,
-        crs=crs,
-        transform=new_transform,
-    ) as dst:
-        dst.write(raster_data)
+    save_georeferenced_tif(resized_array, output_path, new_transform, crs)
 
     return geo
 
