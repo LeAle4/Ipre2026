@@ -108,25 +108,3 @@ def calculate_bbox_size_meters(bounds, crs):
     _, _, height_m = geod.inv(minx_wgs, miny_wgs, minx_wgs, maxy_wgs)
 
     return (abs(width_m), abs(height_m))
-
-def pixels_to_coordinates(polygon:Polygon, pixel_coords:tuple[int, int]) -> tuple[float, float]:
-    """Convert pixel coordinates within the polygon image to geographic coordinates.
-    
-    Args:
-        polygon: Polygon object with georeferencing info.
-        pixel_coords: Tuple of (x_pixel, y_pixel) coordinates.
-        
-    Returns:
-        Tuple of (longitude, latitude) geographic coordinates.
-    """
-    x_pixel, y_pixel = pixel_coords
-    x_min = polygon.coords['left']
-    x_max = polygon.coords['right']
-    y_min = polygon.coords['bottom']
-    y_max = polygon.coords['top']
-    img_width, img_height = polygon.shape[1], polygon.shape[0]
-
-    lon = x_min + (x_pixel / img_width) * (x_max - x_min)
-    lat = y_max - (y_pixel / img_height) * (y_max - y_min)  # Invert y-axis for latitude
-
-    return (lon, lat)

@@ -115,7 +115,7 @@ def resize_polygon(polygon:Polygon, scale:float) -> np.ndarray:
     resized_array = lci(img_array, scale)
     print(tabbed(f"Resized shape: {resized_array.shape}"))
     
-    polygon.shape = resized_array.shape
+    polygon.shape = resized_array.shape[:2]
     return resized_array
 
 def save_resized_polygon(geo:Polygon, resized_array:np.ndarray, save_path:Path) -> None:

@@ -61,10 +61,9 @@ AREA_NAMES = tuple(PATHS.keys())  # ('unita', 'chugchug', 'lluta')
 
 #Change to be calculated
 TARGET_SCALE = 0.05  # Desired scale in meters per pixel for the resized images
-SCALE_FACTORS = {area_name: get_area_scale(area_name) / TARGET_SCALE for area_name in AREA_NAMES}
 WINDOW_SIZE = 224
 STRIDE = int(WINDOW_SIZE / 2)
-THRESHOLD_CROP_CONTENT = 0.8  # Minimum fraction of geoglyph pixels in a crop to be considered valid
+THRESHOLD_CROP_CONTENT = 0.4  # Minimum fraction of geoglyph pixels in a crop to be considered valid
 NEGATIVES_RATIO = 3 # Number of negative samples per positive sample
 
 class PolygonData:
@@ -303,3 +302,6 @@ def make_negative_path(area:str, negative_id:int) -> Path:
     negative_dir.mkdir(parents=True, exist_ok=True)
     relative_negative_dir = negative_dir.relative_to(ROOT)
     return relative_negative_dir / f"{area}_class{CLASSES['ground']}_crop{negative_id}.png"
+
+
+SCALE_FACTORS = {area_name: get_area_scale(area_name) / TARGET_SCALE for area_name in AREA_NAMES}
