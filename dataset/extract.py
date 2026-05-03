@@ -15,10 +15,12 @@ from pathlib import Path
 import geopandas as gpd
 import rasterio
 import numpy as np
+
+import shapely
+
 from rasterio.windows import Window
 from shapely.geometry import MultiPolygon, Polygon, Point
 from shapely.ops import transform
-from pyproj import Geod, Transformer
 from PIL import Image, ImageDraw
 
 # Add parent directory to path to import project helpers
@@ -47,7 +49,6 @@ def save_tif(array, output_path: Path, transform, crs):
     ) as dst:
         dst.write(array)
 
-
 def save_jpeg(array, output_path: Path):
     """Save numpy array as JPEG using PIL."""
     if array.dtype != np.uint8:
@@ -60,7 +61,6 @@ def save_jpeg(array, output_path: Path):
     output_path = ROOT / output_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(output_path), 'JPEG', quality=95, optimize=True)
-
 
 def save_overlay_jpeg(array, polygons, transform, output_path: Path):
     """Save array with polygon overlay as JPEG using PIL."""
@@ -154,18 +154,13 @@ def read_ortho_window(area: str, ortho_path: Path, bounds):
     return chunk, transform, crs
 
 
-def create_polygon_metadata(polygon_idx, geometry, polygon_class, ortho_chunk, bbox_size, output_dir, area):
+def create_polygon_metadata(polygon_idx, geometry, polygon_class, ortho_chunk, bbox_size, area):
     """Create and save polygon metadata."""
     minx, miny, maxx, maxy = geometry.bounds
     
     # Handle MultiPolygon
     polygons = list(geometry.geoms) if isinstance(geometry, MultiPolygon) else [geometry]
     polygon_points = poly_to_coords(polygons[0])['exterior']
-    
-    # Create output paths
-    tif_path = make_tif_path(area, polygon_idx, polygon_class)
-    jpeg_path = make_jpeg_path(area, polygon_idx, polygon_class)
-    overlay_path = make_overlay_path(area, polygon_idx, polygon_class)
     
     # Create metadata object
     poly_obj = Polygon()
@@ -177,19 +172,18 @@ def create_polygon_metadata(polygon_idx, geometry, polygon_class, ortho_chunk, b
     poly_obj.size_m = bbox_size
     poly_obj.coords = {'top': maxy, 'left': minx, 'bottom': miny, 'right': maxx}
     poly_obj.polygon = polygons[0]
-    poly_obj.jpeg_path = jpeg_path
-    poly_obj.tif_path = tif_path
-    poly_obj.overlay_path = overlay_path
+    poly_obj.jpeg_path = Path()
+    poly_obj.tif_path = Path()
+    poly_obj.overlay_path = Path()
     poly_obj.resized_path = Path()
     poly_obj.crop_paths = []
     poly_obj.augmented_paths = []
     
     # Save metadata
     PolygonData.save_polygons([poly_obj])
-    return tif_path, jpeg_path, overlay_path, polygons
+    return poly_obj
 
-
-def extract_polygon_images(polygon_idx, geometry, gdf_crs, polygon_class, ortho_path: Path, output_dir: Path, area: str):
+def extract_polygon_geometries(polygon_idx, geometry, gdf_crs, polygon_class, ortho_path: Path, area: str):
     """Extract and save images for a single polygon."""
     # Read ortho data for exact bounds
     ortho_chunk, ortho_transform, ortho_crs = read_ortho_window(area, ortho_path, geometry.bounds)
@@ -198,24 +192,11 @@ def extract_polygon_images(polygon_idx, geometry, gdf_crs, polygon_class, ortho_
     bbox_size = calculate_bbox_size_meters(geometry.bounds, gdf_crs)
     
     # Create metadata and get paths
-    tif_path, jpeg_path, overlay_path, polygons = create_polygon_metadata(
-        polygon_idx, geometry, polygon_class, ortho_chunk, bbox_size, output_dir, area
+    polygon_obj = create_polygon_metadata(
+        polygon_idx, geometry, polygon_class, ortho_chunk, bbox_size, area
     )
-    
-    # Save images
-    save_tif(ortho_chunk, tif_path, ortho_transform, ortho_crs)
-    save_jpeg(ortho_chunk[:3].transpose(1, 2, 0), jpeg_path)
-    save_overlay_jpeg(ortho_chunk, polygons, ortho_transform, overlay_path)
 
-
-def load_area_data(area):
-    """Load geopackage and orthomosaic paths for an area."""
-    gpkg_path = get_area_labels(area)
-    ortho_path = get_area_tif(area)
-    output_dir = PATHS[area]["polygons"]
-    
-    return gpkg_path, ortho_path, output_dir
-
+    return polygon_obj, ortho_chunk, ortho_transform, ortho_crs
 
 def load_geodataframe(gpkg_path, ortho_path, limit=None):
     """Load and prepare geodataframe from geopackage."""
@@ -231,7 +212,6 @@ def load_geodataframe(gpkg_path, ortho_path, limit=None):
             gdf = gdf.to_crs(ortho_crs)
     
     return gdf
-
 
 def parse_args():
     """Parse command line arguments."""
@@ -282,7 +262,29 @@ def main():
     
     # Process each area
     for area in args.area:
-        process_area(area, args)
+        polygons, geometries = extract_area(area, limit=args.limit, class_filter=args.class_filter)
+        save_data(area, polygons, geometries)
+
+def save_data(area, polygons: tuple[Polygon], geometries: dict[str, shapely.geometry.base.BaseGeometry]):
+    output_dir = PATHS[area]["polygons"]
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    print(title(f"Saving extracted data for area: {area}"))
+    for poly, geom in zip(polygons, geometries):
+        print(f"Saving polygon ID {poly.id}...")
+
+        tif_path = make_tif_path(area, poly.id, poly.class_id)
+        jpeg_path = make_jpeg_path(area, poly.id, poly.class_id)
+        overlay_path = make_overlay_path(area, poly.id, poly.class_id)
+
+        poly.tif_path = tif_path
+        poly.jpeg_path = jpeg_path
+        poly.overlay_path = overlay_path
+        
+        # Save images
+        save_tif(geom["chunk"], tif_path, geom["transform"], geom["crs"])
+        save_jpeg(geom["chunk"][:3].transpose(1, 2, 0), jpeg_path)
+        save_overlay_jpeg(geom["chunk"], [poly.polygon], geom["transform"], overlay_path)
 
 def extract_area(area: str, limit: int = None, class_filter: int = CLASSES["geo"]) -> None:
     """Extract images from geo-referenced data for a single area.
@@ -295,10 +297,10 @@ def extract_area(area: str, limit: int = None, class_filter: int = CLASSES["geo"
     print(title(f"Extracting polygons from area: {area}"))
     
     # Load data
-    gpkg_path, ortho_path, output_dir = load_area_data(area)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
+    gpkg_path = get_area_labels(area)
+    ortho_path = get_area_tif(area)
     gdf = load_geodataframe(gpkg_path, ortho_path, limit)
+    
     print(f"Loaded {len(gdf)} polygons")
     
     if class_filter is not None:
@@ -306,6 +308,8 @@ def extract_area(area: str, limit: int = None, class_filter: int = CLASSES["geo"
     
     # Process each polygon
     processed_count = 0
+    polygons = []
+    geometries = []
     for idx, row in gdf.iterrows():
         polygon_class = row['class']
         
@@ -316,17 +320,16 @@ def extract_area(area: str, limit: int = None, class_filter: int = CLASSES["geo"
         class_name = IDS_TO_NAMES.get(polygon_class, 'unknown')
         print(f"Processing polygon {idx} (class: {polygon_class} - {class_name})...")
         
-        extract_polygon_images(
+        polygon_obj, ortho_chunk, ortho_transform, ortho_crs = extract_polygon_geometries(
             idx, row.geometry, gdf.crs, polygon_class,
-            ortho_path, output_dir, area
+            ortho_path, area
         )
         processed_count += 1
-    
-    print(f"\nDone! Processed {processed_count} polygons for {area}")
+        polygons.append(polygon_obj)
+        geometries.append({ "chunk": ortho_chunk, "transform": ortho_transform, "crs": ortho_crs })
 
-def process_area(area, args):
-    """Process extraction for a single area."""
-    extract_area(area, args.limit, args.class_filter)
+    print(f"\nDone! Processed {processed_count} polygons for {area}")
+    return polygons, geometries
 
 if __name__ == "__main__":
     main()
