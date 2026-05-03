@@ -28,26 +28,10 @@ UTLS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTLS_PATH))
 from handle import ROOT, CLASSES, CLASS_IDS, PATHS, SCALE_FACTORS, WINDOW_SIZE, get_area_tif, get_area_labels, PolygonData, make_jpeg_path, make_overlay_path, make_tif_path
 from text import title
-from utils import Polygon, calculate_bbox_size_meters
+from utils import Polygon, calculate_bbox_size_meters, save_georeferenced_tif
 
 # Create reverse mapping for class names
 IDS_TO_NAMES = {v: k for k, v in CLASSES.items()}
-
-def save_tif(array, output_path: Path, transform, crs):
-    """Save numpy array as georeferenced TIF."""
-    if len(array.shape) == 2:
-        array = array[np.newaxis, ...]
-
-    count, height, width = array.shape
-    output_path = ROOT / output_path
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with rasterio.open(
-        str(output_path), 'w',
-        driver='GTiff', height=height, width=width,
-        count=count, dtype=array.dtype,
-        crs=crs, transform=transform
-    ) as dst:
-        dst.write(array)
 
 def save_jpeg(array, output_path: Path):
     """Save numpy array as JPEG using PIL."""
@@ -284,7 +268,7 @@ def save_data(area, polygons: tuple[Polygon], geometries: dict[str, shapely.geom
         PolygonData.save_polygons([poly])
         
         # Save images
-        save_tif(geom["chunk"], tif_path, geom["transform"], geom["crs"])
+        save_georeferenced_tif(geom["chunk"], tif_path, geom["transform"], geom["crs"])
         save_jpeg(geom["chunk"][:3].transpose(1, 2, 0), jpeg_path)
         save_overlay_jpeg(geom["chunk"], [poly.polygon], geom["transform"], overlay_path)
 
