@@ -69,7 +69,7 @@ def _calculate_crop_borders(i:int, j:int, geo:Polygon, window_size:int, stride:i
     return (min(crop_minx, crop_maxx), min(crop_miny, crop_maxy),
             max(crop_minx, crop_maxx), max(crop_miny, crop_maxy))
 
-def save_crops_boundaries(geo_ids: list[int], crop_ids: list[int], geometries: list, crs = None) -> None:
+def save_crops_boundaries(geo_ids: list[int], crop_ids: list[int], geometries: list, area: str, crs = None) -> None:
     """Save the boundaries of all geo crops as a GeoJSON file."""
     save_path = PATHS[area]["crops"] / f"{area}_geocrops.geojson"
     
@@ -238,7 +238,7 @@ def crop_area(area: str, geos=None, resized_arrays=None, transforms=None, crss=N
         PolygonData.save_polygons([updated_geo])
     
     print(tabbed(f"Saving all crop boundaries for area {area} to GeoJSON..."))
-    save_crops_boundaries(geo_ids, crop_ids, geometries, crs)
+    save_crops_boundaries(geo_ids, crop_ids, geometries, area, crs = crs)
 
     
 if __name__ == "__main__":
