@@ -6,7 +6,7 @@ from pathlib import Path
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
 
-from handle import PolygonData, AREA_NAMES, WINDOW_SIZE, STRIDE
+from handle import AREA_NAMES
 from text import title
 
 # Import processing functions from each module
@@ -15,7 +15,6 @@ import crop
 import resize
 
 from negatives import extract_negatives_area_parallel, save_negatives_boundaries
-
 
 def parse_args():
     """Parse command line arguments."""
@@ -72,6 +71,7 @@ def run_pipeline(area: str, steps: list, savestop: list) -> None:
         crss = [geom["crs"] for geom in geometries]
         if "extract" in savestop:
             extract.save_data(area, geos, geometries)
+            extract.save_geos_boundaries([geo.polygon for geo in geos], area, crss[0])
     
     if "resize" in steps:
         print(title("STEP 2: Resizing polygons"))
@@ -99,7 +99,7 @@ def run_pipeline(area: str, steps: list, savestop: list) -> None:
     if "crop" in steps:
         print(title("STEP 3: Generating crops"))
         crop.crop_area(area, geos, img_arrays, transforms, crss)
-    
+
     if "negatives" in steps:
         print(title("STEP 4: Extracting negatives"))
         save_boundaries, area_tif = extract_negatives_area_parallel(area)

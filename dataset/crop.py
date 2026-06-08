@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Generator
 from skimage.util import view_as_windows
 from PIL import Image
-from shapely.geometry import box
+from shapely.geometry import box, Polygon as ShapelyPolygon
 
 UTILS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTILS_PATH))
@@ -69,28 +69,18 @@ def _calculate_crop_borders(i:int, j:int, geo:Polygon, window_size:int, stride:i
     return (min(crop_minx, crop_maxx), min(crop_miny, crop_maxy),
             max(crop_minx, crop_maxx), max(crop_miny, crop_maxy))
 
-def save_crop_boundaries_geojson(geo: Polygon, boundaries: list, rows: list[int], cols: list[int], proportions: list[float]) -> None:
-    """Persist evaluated crop boundaries to a GeoJSON file for analysis."""
-    output_dir = PATHS[geo.area]["crops"] / f"geo_{geo.id}"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{geo.area}_class{geo.class_id}_{geo.id}_crop_boundaries.geojson"
-    area_tif = get_area_tif(geo.area)
-    with rasterio.open(area_tif) as src:
-        area_crs = src.crs
+def save_crops_boundaries(geo_ids: list[int], crop_ids: list[int], geometries: list, crs = None) -> None:
+    """Save the boundaries of all geo crops as a GeoJSON file."""
+    save_path = PATHS[area]["crops"] / f"{area}_geocrops.geojson"
+    
+    gdf = gpd.GeoDataFrame({
+        "geo_id": geo_ids,
+        "crop_id": crop_ids,
+        "geometry": geometries
+    }, crs=crs)
 
-    gdf = gpd.GeoDataFrame(
-        {
-            "polygon_id": int(geo.id),
-            "area": geo.area,
-            "class_id": int(geo.class_id),
-            "row": rows,
-            "col": cols,
-            "proportion": proportions,
-        },
-        geometry=boundaries,
-        crs=area_crs,
-    )
-    gdf.to_file(output_path, driver="GeoJSON")
+    gdf.to_file(save_path, driver="GeoJSON")
+    print(tabbed(f"Saved all geo crops for area {area} to {save_path}"))
 
 def make_crops(geo:Polygon, img_array:np.ndarray, crop_size:int, stride:int) -> Generator[tuple[np.ndarray, int, int], None, None]:
     """Generate crops from the input image array. Guarantees at least one crop per polygon.
@@ -117,8 +107,9 @@ def make_crops(geo:Polygon, img_array:np.ndarray, crop_size:int, stride:int) -> 
             proportion = calculate_crop_proportion(geo, crop_borders)
 
             minx, miny, maxx, maxy = crop_borders
+            crop_geometry = box(minx, miny, maxx, maxy)
 
-            boundaries.append(box(minx, miny, maxx, maxy))
+            boundaries.append(crop_geometry)
             rows.append(int(i))
             cols.append(int(j))
             proportions.append(float(proportion))
@@ -128,12 +119,12 @@ def make_crops(geo:Polygon, img_array:np.ndarray, crop_size:int, stride:int) -> 
                 best_crop = view[i, j, 0].copy()
             
             if proportion >= THRESHOLD_CROP_CONTENT:
-                yield view[i, j, 0], i, j
+                yield view[i, j, 0], crop_geometry, i, j
                 crop_count += 1
     
     # If no crops were generated, yield the best one we found
     if crop_count == 0 and best_crop is not None and best_proportion > 0.0:
-        yield best_crop, -1, -1
+        yield best_crop, crop_geometry, -1, -1
 
 def get_polygon_crops(polygon:Polygon, crop_size:int=WINDOW_SIZE, stride:int=STRIDE) -> Generator[tuple[np.ndarray, int, int], None, None]:
     """Generate crops from the polygon's image.
@@ -219,6 +210,9 @@ def crop_area(area: str, geos=None, resized_arrays=None, transforms=None, crss=N
     if geos is None:
         geos = list(PolygonData.polygons(area_filter=(area,), classes_filter=(CLASSES["geo"],)))
 
+    geo_ids = []
+    crop_ids = []
+    geometries = []
     for i, geo in enumerate(geos):
         print(f"Generating crops for polygon ID {geo.id}...")
         
@@ -230,14 +224,23 @@ def crop_area(area: str, geos=None, resized_arrays=None, transforms=None, crss=N
             crop_generator = make_crops(geo, img_array, crop_size=WINDOW_SIZE, stride=STRIDE)
         else:
             crop_generator = get_polygon_crops(geo)
-            
-        for id, (geo_crop, row, col) in enumerate(crop_generator):
+        
+        for id, (geo_crop, crop_geometry, row, col) in enumerate(crop_generator):
             print(tabbed(f"Saving crop ID {id}..."))
             crop_path = make_crop_path(geo, area, id)
             updated_geo = save_polygon_crop(geo, geo_crop, crop_path, row, col, STRIDE, orig_transform, crs)
-        
-        PolygonData.save_polygons([updated_geo])
+            
+            print(tabbed(f"Adding crop shapely boundary to list for batch save..."))
+            geo_ids.append(geo.id)
+            crop_ids.append(id)
+            geometries.append(crop_geometry)
 
+        PolygonData.save_polygons([updated_geo])
+    
+    print(tabbed(f"Saving all crop boundaries for area {area} to GeoJSON..."))
+    save_crops_boundaries(geo_ids, crop_ids, geometries, crs)
+
+    
 if __name__ == "__main__":
     args = parse_arguments()
     areas = args.area

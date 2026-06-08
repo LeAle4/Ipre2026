@@ -27,7 +27,7 @@ from PIL import Image, ImageDraw
 UTLS_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(UTLS_PATH))
 from handle import ROOT, CLASSES, CLASS_IDS, PATHS, SCALE_FACTORS, WINDOW_SIZE, get_area_tif, get_area_labels, PolygonData, make_jpeg_path, make_overlay_path, make_tif_path
-from text import title
+from text import tabbed, title
 from utils import Polygon, calculate_bbox_size_meters, save_georeferenced_tif
 
 # Create reverse mapping for class names
@@ -271,6 +271,13 @@ def save_data(area, polygons: tuple[Polygon], geometries: dict[str, shapely.geom
         save_georeferenced_tif(geom["chunk"], tif_path, geom["transform"], geom["crs"])
         save_jpeg(geom["chunk"][:3].transpose(1, 2, 0), jpeg_path)
         save_overlay_jpeg(geom["chunk"], [poly.polygon], geom["transform"], overlay_path)
+
+def save_geos_boundaries(boundaries:list[Polygon], area:str, area_crs:str) -> None:
+    """Save the geo sample boundaries as a GeoJSON file."""
+    gdf = gpd.GeoDataFrame(geometry=boundaries, crs=area_crs)
+    save_path = PATHS[area]["polygons"] / f"{area}_geos.geojson"
+    gdf.to_file(save_path, driver="GeoJSON")
+    print(tabbed(f"Saved geo boundaries for area {area} to {save_path}"))
 
 def extract_area(area: str, limit: int = None, class_filter: int = CLASSES["geo"]) -> None:
     """Extract images from geo-referenced data for a single area.
