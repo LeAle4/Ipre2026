@@ -286,5 +286,35 @@ def make_negative_path(area:str, negative_id:int) -> Path:
     relative_negative_dir = negative_dir.relative_to(ROOT)
     return relative_negative_dir / f"{area}_class{CLASSES['ground']}_crop{negative_id}.png"
 
+def count_crops(area:str):
+    """
+    Counts the number of crops in a given area.
+
+    Args:
+        area (str): The name of the area to count crops in.
+
+    Returns:
+        int: The number of crops in the specified area.
+    """
+    crop_path = PATHS[area]["crops"]
+    sum = 0
+    for element in crop_path.iterdir():
+        if element.is_dir():
+            sum += len(tuple(crop_path.joinpath(element).glob("*.tif")))
+    
+    return sum
+
+def count_negatives(area):
+    """
+    Counts the number of negative samples in a given area.
+
+    Args:
+        area (str): The name of the area to count negative samples in.
+
+    Returns:
+        int: The number of negative samples in the specified area.
+    """
+    negative_path = PATHS[area]["negatives"]
+    return len(tuple(negative_path.glob("*.png")))
 
 SCALE_FACTORS = {area_name: get_file_resolution(get_area_tif(area_name)) / TARGET_SCALE for area_name in AREA_NAMES}
