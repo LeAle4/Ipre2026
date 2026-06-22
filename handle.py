@@ -1,10 +1,10 @@
 # Core imports
+from utils import get_file_resolution
 import json
 from pathlib import Path
 from typing import Generator
 
 import numpy as np
-import rasterio
 from PIL import Image
 
 from utils import Polygon
@@ -112,7 +112,7 @@ class PolygonData:
 
     @classmethod
     def negative_count(cls, areas:tuple[str, ...]) -> int:
-        """Calculate the total number of negative samples based on the positive count and defined ratio.
+        """Calculate the total number of negative samples.
         
         Args:
             areas: Tuple of study area names to include in the count.
@@ -175,32 +175,6 @@ def calculate_area_scale(area:str) -> float:
     average_scale = sum(scales) / len(scales)
     return average_scale
 
-def get_area_scale(area:str) -> float:
-    """Get the scale factor for a given study area.
-    
-    Attempts to extract pixel size from GeoTIFF transform. Detects unit (meters or km)
-    and converts to meters if needed.
-    
-    Args:
-        area: Name of the study area ('unita', 'chugchug', or 'lluta').
-    """
-    tif = get_area_tif(area)
-    with rasterio.open(tif) as dataset:
-
-        if dataset.crs.is_geographic:
-            # If the CRS is geographic, we need to calculate the pixel size in meters
-            # using the latitude of the area (assuming it's near the equator for simplicity)
-            lat = dataset.bounds.top  # Use the top latitude of the dataset
-            pixel_size_x = abs(dataset.transform.a) * (111320 * np.cos(np.radians(lat)))  # Convert degrees to meters
-            pixel_size_y = abs(dataset.transform.e) * 111320  # Convert degrees to meters
-            scale = (pixel_size_x + pixel_size_y) / 2
-        else:
-            pixel_size_x = abs(dataset.transform.a)
-            pixel_size_y = abs(dataset.transform.e)
-            scale = (pixel_size_x + pixel_size_y) / 2
-
-    return scale
-
 def get_area_tif(area:str) -> Path:
     """Get the path to the orthomosaic GeoTIFF for the specified study area.
     
@@ -218,6 +192,15 @@ def get_area_labels(area:str) -> Path:
     raw_path = PATHS[area]["raw"]
     geojson_file = raw_path.glob("*.gpkg")
     return next(geojson_file)
+
+def get_area_DEM(area:str) -> Path:
+    """Get the path to the DEM GeoTIFF for the specified study area.
+    
+    Args:
+        area: Name of the study area ('unita', 'chugchug', or 'lluta')."""
+    raw_path = PATHS[area]["raw"]
+    dem_file = raw_path.glob("*DEM.tif")
+    return next(dem_file)
 
 def load_img_array_from_path(path:Path) -> np.ndarray:
     """Load a GeoTIFF image from the given path and return as a NumPy array.
@@ -304,4 +287,4 @@ def make_negative_path(area:str, negative_id:int) -> Path:
     return relative_negative_dir / f"{area}_class{CLASSES['ground']}_crop{negative_id}.png"
 
 
-SCALE_FACTORS = {area_name: get_area_scale(area_name) / TARGET_SCALE for area_name in AREA_NAMES}
+SCALE_FACTORS = {area_name: get_file_resolution(get_area_tif(area_name)) / TARGET_SCALE for area_name in AREA_NAMES}
