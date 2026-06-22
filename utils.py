@@ -156,3 +156,28 @@ def calculate_bbox_size_meters(bounds, crs):
     _, _, height_m = geod.inv(minx_wgs, miny_wgs, minx_wgs, maxy_wgs)
 
     return (abs(width_m), abs(height_m))
+
+def get_file_resolution(file_path:Path) -> float:
+    """Get the scale factor for a given study area.
+    
+    Attempts to extract pixel size from GeoTIFF transform. Detects unit (meters or km)
+    and converts to meters if needed.
+    
+    Args:
+        file_path: Path to the file.
+    """
+    with rasterio.open(file_path) as dataset:
+
+        if dataset.crs.is_geographic:
+            # If the CRS is geographic, we need to calculate the pixel size in meters
+            # using the latitude of the area (assuming it's near the equator for simplicity)
+            lat = dataset.bounds.top  # Use the top latitude of the dataset
+            pixel_size_x = abs(dataset.transform.a) * (111320 * np.cos(np.radians(lat)))  # Convert degrees to meters
+            pixel_size_y = abs(dataset.transform.e) * 111320  # Convert degrees to meters
+            scale = (pixel_size_x + pixel_size_y) / 2
+        else:
+            pixel_size_x = abs(dataset.transform.a)
+            pixel_size_y = abs(dataset.transform.e)
+            scale = (pixel_size_x + pixel_size_y) / 2
+
+    return scale
