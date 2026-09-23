@@ -181,7 +181,7 @@ def get_area_tif(area:str) -> Path:
     Args:
         area: Name of the study area ('unita', 'chugchug', or 'lluta')."""
     raw_path = PATHS[area]["raw"]
-    tif_file = raw_path.glob("*ortomosaico.tif")
+    tif_file = raw_path.glob("*.tif")
     return next(tif_file)
 
 def get_area_labels(area:str) -> Path:
