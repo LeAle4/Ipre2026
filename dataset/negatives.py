@@ -1,3 +1,5 @@
+# raise NotImplementedError("CADA THREAD INSCRIBE UN id QUE NO CORRESPONDE, POR LO QUE HAY UN JSON OBJECT OVERLOAD")
+
 import sys
 import argparse
 import random
