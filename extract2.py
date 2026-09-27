@@ -58,21 +58,27 @@ def extract_datapoint(site_data: SiteData, orto_view: rasterio.DatasetReader, la
     desired_bounds = scale_bounds(geometry_bounds, window_size, stride, site_data.m_px, desired_scale)
     window_view = rasterio.windows.from_bounds(*desired_bounds, transform=orto_view.transform)
     window_img = orto_view.read(window=window_view)
-    return DataPoint(site_data.name, label, window_img, desired_bounds, site_data.m_px)
+    return DataPoint(site_data.name, label.data_label, label.geometry, window_img, desired_bounds, site_data.m_px)
 
-def get_polygon_imgs(window_size: int, stride: int, desired_scale: float) -> Generator:
+def get_polygon_imgs(window_size: int, stride: int, desired_scale: float, verbose: bool) -> Generator:
     sites = get_sites(DATA_DIR)
 
     for site in sites.values():
+        if verbose:
+            print(f"Processing site: {site.name}")
         labels = site.label_data()
         geo_labels = labels.filter_class(GEO_CLASS)
+        if verbose:
+            print(f"Found {len(geo_labels)} geoglyph labels in site {site.name}")
         with site.access_tif() as tif:
             for label in geo_labels:
+                if verbose:
+                    print(f"Processing label {label.data_label} in site {site.name}")
                 yield extract_datapoint(site, tif, label, window_size, stride, desired_scale)
 
 def main():
     from parameters import DEFAULT_WINDOW_SIZE, DEFAULT_STRIDE, DEFAULT_TARGET_SCALE
-    for datapoint in get_polygon_imgs(DEFAULT_WINDOW_SIZE, DEFAULT_STRIDE, DEFAULT_TARGET_SCALE):
+    for datapoint in get_polygon_imgs(DEFAULT_WINDOW_SIZE, DEFAULT_STRIDE, DEFAULT_TARGET_SCALE, verbose=True):
         print(datapoint)
         
 if __name__ == "__main__":

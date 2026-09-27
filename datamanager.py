@@ -125,15 +125,28 @@ class SiteData:
         return f"SiteData(site_name={self.name}, site_path={self.path}, tiff_path={self.tiff_path}, label_path={self.label_path}, dem_path={self.dem_path})"
 
 class DataPoint:
-    def __init__(self, site_name:str, label: Label, image:np.ndarray, image_bounds: tuple[float, float, float, float], m_px: float):
+    def __init__(self, site_name:str, data_label: int, polygon_bounds: MultiPolygon , image:np.ndarray, image_bounds: tuple[float, float, float, float], m_px: float):
         self.name = site_name
-        self.label = label
+        self.data_label = data_label
+        self.polygon_bounds = polygon_bounds
         self.image = image
         self.bounds = shapely.box(*image_bounds)
         self.m_px = m_px
+        self.image_resized = False
+
+    def modify_image(self, new_image: np.ndarray) -> None:
+        """Modify the image of the DataPoint and update its bounds and metric scale.
+
+        Args:
+            new_image: The new image to replace the current one.
+            new_bounds: The new bounds of the image in the format (minx, miny, maxx, maxy).
+            new_m_px: The new metric scale in meters per pixel.
+        """
+        self.image = new_image
+        self.image_resized = True
 
     def __str__(self):
-        return f"DataPoint(site_name={self.name}, label={self.label}, image_shape={self.image.shape}, bounds={self.bounds.bounds}, m_px={self.m_px})"
+        return f"DataPoint(site_name={self.name}, label={self.data_label}, polygon_bounds={self.polygon_bounds}, image_shape={self.image.shape}, bounds={self.bounds.bounds}, m_px={self.m_px})"
 
 def get_sites(data_path:Path) -> dict[str, SiteData]:
     """Get a list of SiteData objects for each site in the data path.
