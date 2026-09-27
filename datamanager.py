@@ -125,12 +125,22 @@ class SiteData:
         return f"SiteData(site_name={self.name}, site_path={self.path}, tiff_path={self.tiff_path}, label_path={self.label_path}, dem_path={self.dem_path})"
 
 class DataPoint:
-    def __init__(self, site_name:str, data_label: int, polygon_bounds: MultiPolygon , image:np.ndarray, image_bounds: tuple[float, float, float, float], m_px: float):
+
+    last_id = 0
+
+    def __init__(self, site_name:str, data_label: int, polygon_bounds: MultiPolygon, crs:str, image:np.ndarray, image_bounds: tuple[float, float, float, float], m_px: float):
+        self.id = f"{DataPoint.last_id:05d}"
+        DataPoint.last_id += 1
         self.name = site_name
         self.data_label = data_label
         self.polygon_bounds = polygon_bounds
         self.origin_scale = m_px
+        self.crs = crs
         self.image = image
+        #image shape given is (channels, height, width) but we want to store it as (height, width, channels)
+        if len(self.image.shape) == 3:
+            self.image = np.transpose(self.image, (1, 2, 0))
+
         self.image_box = shapely.box(*image_bounds)
         self.m_px = m_px
         self.image_resized = False
@@ -148,7 +158,22 @@ class DataPoint:
         self.image_resized = True
 
     def __str__(self):
-        return f"DataPoint(site_name={self.name}, label={self.data_label}, polygon_bounds={self.polygon_bounds}, image_shape={self.image.shape}, bounds={self.bounds.bounds}, m_px={self.m_px})"
+        return f"DataPoint(site_name={self.name}, label={self.data_label}, polygon_bounds={self.polygon_bounds}, image_shape={self.image.shape}, bounds={self.image_box.bounds}, m_px={self.m_px})"
+
+class Crop:
+
+    last_id = 0
+
+    def __init__(self, data_point: DataPoint, crop_image: np.ndarray, crop_bounds: shapely.geometry.Polygon, intersection_proportion: float = 0.0):
+        self.id = f"{Crop.last_id:05d}"
+        Crop.last_id += 1
+        self.data_point = data_point
+        self.crop_image = crop_image
+        self.crop_bounds = crop_bounds
+        self.intersection_proportion = intersection_proportion
+
+class CSVWriter:
+    pass
 
 def get_sites(data_path:Path) -> dict[str, SiteData]:
     """Get a list of SiteData objects for each site in the data path.

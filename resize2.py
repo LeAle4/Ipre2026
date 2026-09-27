@@ -108,7 +108,9 @@ def resize_datapoint_image(datapoint: DataPoint, desired_metric_scale: float) ->
     new_width = int(datapoint.image.shape[1] * scaling_factor)
 
     # Resize the image using Lagrange-Chebyshev Interpolation (LCI)
+    print(f"Resizing image from {datapoint.image.shape} to ({new_height}, {new_width}) with scaling factor {scaling_factor:.4f}")
     resized_image = lci(datapoint.image, new_height, new_width)
+    print(f"Resized image shape: {resized_image.shape}")
 
     # Update the DataPoint with the resized image and mark it as resized
     datapoint.modify_image(resized_image, desired_metric_scale)

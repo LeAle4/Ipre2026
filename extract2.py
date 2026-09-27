@@ -1,3 +1,4 @@
+import math
 from typing import Generator
 
 import rasterio
@@ -5,81 +6,68 @@ import rasterio
 from parameters import DATA_DIR, GEO_CLASS
 from datamanager import Label, SiteData, DataPoint, get_sites
 
-def size_for_multiplicity(current_size: float, desired_size: float, stride: float) -> float:
-    if current_size <= desired_size:
-        return desired_size
+def calculate_target_extent(
+    current_meters: float,
+    desired_window_px: int,
+    stride_px: int,
+    desired_scale: float,
+    eps: float = 1e-6
+) -> float:
+    """Calculates required ground extent in meters to fit integer tile steps at desired_scale."""
+    current_px = current_meters / desired_scale
+    if current_px <= desired_window_px + eps:
+        target_px = desired_window_px
     else:
-        candidate =  (current_size - desired_size) // stride * stride + desired_size
-        if candidate < current_size:
-            candidate += stride
-        return candidate
-
-def scale_bounds(bounds: tuple[float, float, float, float], desired_window_size: int, stride: int, metric_scale: float, desired_metric_scale: float) -> tuple[float, float, float, float]:
-    """Scale the bounds to ensure that the img we are extracting is a multiple of the desired window size.
+        # Number of strides k needed, using epsilon tolerance to avoid float triggers
+        k = math.ceil((current_px - desired_window_px - eps) / stride_px)
+        target_px = desired_window_px + k * stride_px
     
-    bounds: A tuple representing the bounding box (minx, miny, maxx, maxy).
-    desired_window_size: The desired window size to which the bounds should be scaled.
-    stride: The stride to be used for the window.
-    metric_scale: The scale of the bounds in meters.
-    desired_metric_scale: The desired scale of the image in meters.
+    return target_px * desired_scale
+
+def scale_bounds(
+    bounds: tuple[float, float, float, float],
+    desired_window_size: int,
+    stride: int,
+    desired_metric_scale: float
+) -> tuple[float, float, float, float]:
+    """Expands bounding box (minx, miny, maxx, maxy) in meters to tile cleanly
+    at desired_metric_scale (m/px) with given window_size (px) and stride (px).
     """
     minx, miny, maxx, maxy = bounds
-    #What is the actual size of the window in the bounds scale
-    window_size_metric = desired_window_size * metric_scale
-    #How bigger or smaller should the image be so that later in the rescaling the image has the desired size.
-    scaling_factor = metric_scale / desired_metric_scale
-    #The window in meters that we want to extract from the
-    actual_windows_size_metric = window_size_metric * scaling_factor
-
-    stride_scaled = stride * metric_scale * scaling_factor
-
     width = maxx - minx
     height = maxy - miny
 
-    # Calculate the scaling factor needed to make the width and height multiples of the desired window size
-    scale_factor_x = size_for_multiplicity(width, actual_windows_size_metric, stride_scaled) / width
-    scale_factor_y = size_for_multiplicity(height, actual_windows_size_metric, stride_scaled) / height
+    new_width = calculate_target_extent(width, desired_window_size, stride, desired_metric_scale)
+    new_height = calculate_target_extent(height, desired_window_size, stride, desired_metric_scale)
 
-    # Apply the scaling factor to the bounds
-    center_x = (minx + maxx) / 2
-    center_y = (miny + maxy) / 2
-    new_width = width * scale_factor_x
-    new_height = height * scale_factor_y
+    center_x = (minx + maxx) / 2.0
+    center_y = (miny + maxy) / 2.0
 
-    new_minx = center_x - new_width / 2
-    new_maxx = center_x + new_width / 2
-    new_miny = center_y - new_height / 2
-    new_maxy = center_y + new_height / 2
+    new_minx = center_x - new_width / 2.0
+    new_maxx = center_x + new_width / 2.0
+    new_miny = center_y - new_height / 2.0
+    new_maxy = center_y + new_height / 2.0
 
     return new_minx, new_miny, new_maxx, new_maxy
 
 def extract_datapoint(site_data: SiteData, orto_view: rasterio.DatasetReader, label: Label, window_size:int, stride: int, desired_scale: float) -> DataPoint:
     geometry_bounds = label.geometry.bounds
-    desired_bounds = scale_bounds(geometry_bounds, window_size, stride, site_data.m_px, desired_scale)
+    desired_bounds = scale_bounds(geometry_bounds, window_size, stride, desired_scale)
+    print(desired_bounds)
     window_view = rasterio.windows.from_bounds(*desired_bounds, transform=orto_view.transform)
     window_img = orto_view.read(window=window_view)
-    return DataPoint(site_data.name, label.data_label, label.geometry, window_img, desired_bounds, site_data.m_px)
+    print(window_img.shape)
+    return DataPoint(site_data.name, label.data_label, label.geometry, site_data.crs, window_img, desired_bounds, site_data.m_px)
 
-def get_polygon_imgs(window_size: int, stride: int, desired_scale: float, verbose: bool) -> Generator:
-    sites = get_sites(DATA_DIR)
-
-    for site in sites.values():
-        if verbose:
-            print(f"Processing site: {site.name}")
-        labels = site.label_data()
-        geo_labels = labels.filter_class(GEO_CLASS)
-        if verbose:
-            print(f"Found {len(geo_labels)} geoglyph labels in site {site.name}")
-        with site.access_tif() as tif:
-            for label in geo_labels:
-                if verbose:
-                    print(f"Processing label {label.data_label} in site {site.name}")
-                yield extract_datapoint(site, tif, label, window_size, stride, desired_scale)
-
-def main():
-    from parameters import DEFAULT_WINDOW_SIZE, DEFAULT_STRIDE, DEFAULT_TARGET_SCALE
-    for datapoint in get_polygon_imgs(DEFAULT_WINDOW_SIZE, DEFAULT_STRIDE, DEFAULT_TARGET_SCALE, verbose=True):
-        print(datapoint)
-        
-if __name__ == "__main__":
-    main()
+def get_polygon_imgs(site: SiteData,window_size: int, stride: int, desired_scale: float, verbose: bool) -> Generator[DataPoint, None, None]:
+    if verbose:
+        print(f"Processing site: {site.name}")
+    labels = site.label_data()
+    geo_labels = labels.filter_class(GEO_CLASS)
+    if verbose:
+        print(f"Found {len(geo_labels)} geoglyph labels in site {site.name}")
+    with site.access_tif() as tif:
+        for label in geo_labels:
+            if verbose:
+                print(f"Processing label {label.data_label} in site {site.name}")
+            yield extract_datapoint(site, tif, label, window_size, stride, desired_scale)

@@ -15,5 +15,5 @@ ROAD_TYPE = "road"
 DEFAULT_TARGET_SCALE = 0.05  # Desired scale in meters per pixel for the resized images
 DEFAULT_WINDOW_SIZE = 224
 DEFAULT_STRIDE = DEFAULT_WINDOW_SIZE // 2
-DEFAULT_THRESHOLD_CROP_CONTENT = 0.4  # Minimum fraction of geoglyph pixels in a crop to be considered valid
+DEFAULT_THRESHOLD_CROP_CONTENT = 1/4  # Minimum fraction of geoglyph pixels in a crop to be considered valid
 DEFAULT_NEGATIVES_RATIO = 3 # Number of negative samples per positive sample
