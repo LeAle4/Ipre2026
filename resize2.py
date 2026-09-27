@@ -111,4 +111,4 @@ def resize_datapoint_image(datapoint: DataPoint, desired_metric_scale: float) ->
     resized_image = lci(datapoint.image, new_height, new_width)
 
     # Update the DataPoint with the resized image and mark it as resized
-    datapoint.modify_image(resized_image)
+    datapoint.modify_image(resized_image, desired_metric_scale)

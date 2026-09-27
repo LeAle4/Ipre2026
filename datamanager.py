@@ -129,12 +129,13 @@ class DataPoint:
         self.name = site_name
         self.data_label = data_label
         self.polygon_bounds = polygon_bounds
+        self.origin_scale = m_px
         self.image = image
-        self.bounds = shapely.box(*image_bounds)
+        self.image_box = shapely.box(*image_bounds)
         self.m_px = m_px
         self.image_resized = False
 
-    def modify_image(self, new_image: np.ndarray) -> None:
+    def modify_image(self, new_image: np.ndarray, new_scale: float) -> None:
         """Modify the image of the DataPoint and update its bounds and metric scale.
 
         Args:
@@ -143,6 +144,7 @@ class DataPoint:
             new_m_px: The new metric scale in meters per pixel.
         """
         self.image = new_image
+        self.m_px = new_scale
         self.image_resized = True
 
     def __str__(self):
