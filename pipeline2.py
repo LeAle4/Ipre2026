@@ -19,13 +19,13 @@ def main():
     for site in sites.values():
         writer.start_site(site)
         print(f"Processing site: {site.name}")
-        for geo_datapoint in get_polygon_imgs(site, DEFAULT_WINDOW_SIZE, DEFAULT_STRIDE, DEFAULT_TARGET_SCALE, verbose=True):
+        for geo_datapoint in get_polygon_imgs(site, DEFAULT_WINDOW_SIZE, DEFAULT_STRIDE, DEFAULT_TARGET_SCALE):
             print(f"Processing polygon datapoint: {geo_datapoint.id}")
             resize_datapoint_image(geo_datapoint, DEFAULT_TARGET_SCALE)
             print(f"Resized polygon datapoint: {geo_datapoint.id} to scale {DEFAULT_TARGET_SCALE}.")
             for n, crop in enumerate(generate_crops(geo_datapoint, DEFAULT_WINDOW_SIZE, DEFAULT_STRIDE, threshold=DEFAULT_THRESHOLD_CROP_CONTENT)):
-                print(f"Processing crop N°{n} for {geo_datapoint.id}: {crop.id}")
-                writer.add_crop(geo_datapoint, crop)
+                print(f"Processing crop N°{n} for {geo_datapoint.id}")
+                writer.add_crop(geo_datapoint, crop, n)
         print(f"Generating negative samples for site: {site.name}")
         for n, negative_datapoint in enumerate(generate_negative_samples(site, num_positive_samples=writer.positive_count, window_size=DEFAULT_WINDOW_SIZE, desired_scale=DEFAULT_TARGET_SCALE, negative_ratio=DEFAULT_NEGATIVES_RATIO)):
             print(f"Processing negative datapoint N°{n}/{writer.positive_count*DEFAULT_NEGATIVES_RATIO}: {negative_datapoint.id}")

@@ -71,17 +71,19 @@ def generate_crops(
 
     #We guarantee that at least 1 crop will be yielded, even if it doesn't meet the threshold
     yielded_at_least_one = False
-    back_up_crop, back_up_bounds = None, None
+    best_threshold = 0
+    best_crop, best_bounds = None, None
     for img_crop, bounds in zip(img_crops_flat, crop_boundaries):
         if data_point.polygon_bounds.intersects(bounds):
-            if not yielded_at_least_one:
-                back_up_crop, back_up_bounds = img_crop, bounds
             intersection_area = data_point.polygon_bounds.intersection(bounds).area
             crop_area = bounds.area
             print(f"Crop bounds: {bounds.bounds}, Intersection area: {intersection_area}, Crop area: {crop_area}, Threshold: {threshold}, Intersection ratio: {intersection_area / crop_area}")
             if crop_area > 0 and (intersection_area / crop_area) >= threshold:
                 yielded_at_least_one = True
                 yield Crop(data_point, img_crop, bounds, intersection_area / crop_area)
-    if not yielded_at_least_one and back_up_crop is not None:
+            elif crop_area > 0 and (intersection_area / crop_area) > best_threshold:
+                best_threshold = intersection_area / crop_area
+                best_crop, best_bounds = img_crop, bounds
+    if not yielded_at_least_one and best_crop is not None:
         # If no crops met the threshold, yield the first intersecting crop as a backup
-        yield Crop(data_point, back_up_crop, back_up_bounds)
+        yield Crop(data_point, best_crop, best_bounds)

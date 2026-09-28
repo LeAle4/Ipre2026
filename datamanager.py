@@ -172,11 +172,7 @@ class DataPoint:
 
 class Crop:
 
-    last_id = 0
-
     def __init__(self, data_point: DataPoint, crop_image: np.ndarray, crop_bounds: shapely.geometry.Polygon, intersection_proportion: float = 0.0):
-        self.id = f"{Crop.last_id:05d}"
-        Crop.last_id += 1
         self.data_point = data_point
         self.crop_image = crop_image
         self.crop_bounds = crop_bounds
@@ -229,9 +225,9 @@ class DataWriter:
         self.site_paths = {site_name: self.BASE / site_name for site_name in sites_data.keys()}
         self.sites_metadata = self._init_sites_metadata()
         self.image_metadata = self._init_image_metadata()
-        self.shape_geometries = self._init_shape_geometries()
         self.working_site = None
         self.working_datapoint = None
+        self.shape_records = []
 
         self._ensure_sites_dir()
 
@@ -252,10 +248,6 @@ class DataWriter:
     def _init_image_metadata(self) -> pd.DataFrame:
         """Initialize the image metadata DataFrame with the appropriate columns."""
         return pd.DataFrame(columns=DataWriter.IMG_COLUMNS)
-
-    def _init_shape_geometries(self) -> gpd.GeoDataFrame:
-        """Initialize the shape geometries GeoDataFrame with the appropriate columns."""
-        return gpd.GeoDataFrame(columns=DataWriter.SHAPE_GEOMETRIES_COLUMNS, geometry=DataWriter.GEOMETRY_COLUMN)
 
     def _construct_full_id(self, site_name:str, data_point: DataPoint, crop: Crop | None) -> str:
         """Construct a full ID string for the data point or crop.
@@ -305,7 +297,7 @@ class DataWriter:
                 self.working_site[f"CHANNEL_{channel}_MAX"] = np.max(channel_data)
                 self.working_site[f"CHANNEL_{channel}_AVG"] = np.mean(channel_data)
 
-    def add_crop(self, datapoint:DataPoint, crop: Crop | None = None) -> None:
+    def add_crop(self, datapoint:DataPoint, crop: Crop | None = None, crop_n:int = 1) -> None:
         """Add a new image datapoint to the metadata.
 
         Args:
@@ -320,18 +312,16 @@ class DataWriter:
         
         if crop is None:
             threshold_clear = 1.0
-            crop_id = f"{0:05d}"
             image = datapoint.image
         else:
             threshold_clear = crop.intersection_proportion
-            crop_id = crop.id
             image = crop.crop_image
 
         self.image_metadata.loc[len(self.image_metadata)] = {
             "SITE_NAME": self.working_site["SITE_NAME"],
             "ID": full_id,
             "GEO_ID": datapoint.id,
-            "CROP_ID": crop_id,
+            "CROP_ID": f"{crop_n:05d}",
             "DATA_LABEL": datapoint.data_label,
             "SCALE_MPX": datapoint.m_px,
             "CHANNELS": datapoint.image.shape[2],
@@ -344,13 +334,14 @@ class DataWriter:
         elif datapoint.data_label == GROUND_CLASS:
             self.working_site["NUMBER_OF_NEGATIVES"] += 1
 
-        self.shape_geometries.loc[len(self.shape_geometries)] = {
-            "SITE_NAME": self.working_site["SITE_NAME"],
-            "ID": full_id,
-            "GEO_ID": datapoint.id,
-            "DATA_LABEL": datapoint.data_label,
-            "GEOMETRY": datapoint.polygon_bounds
-        }
+        self.shape_records.append({
+                    "SITE_NAME": self.working_site["SITE_NAME"],
+                    "ID": full_id,
+                    "GEO_ID": datapoint.id,
+                    "DATA_LABEL": datapoint.data_label,
+                    "THRESHOLD_CLEAR": threshold_clear,
+                    "geometry": datapoint.polygon_bounds
+                })
 
         img = Image.fromarray(image)
         img.save(self.BASE / self.working_site["SITE_NAME"] / f"{full_id}.png")
@@ -362,13 +353,18 @@ class DataWriter:
         
         self.sites_metadata.loc[len(self.sites_metadata)] = self.working_site
         self.image_metadata.to_csv(self.BASE / self.working_site["SITE_NAME"] / "image_metadata.csv", index=False)
-        self.shape_geometries.to_file(self.BASE / self.working_site["SITE_NAME"] / "shape_geometries.gpkg", driver="GPKG")
-
+        shape_gdf = gpd.GeoDataFrame(
+            self.shape_records,
+            geometry="geometry",
+            crs=self.working_site["CRS"]
+        )
+        shape_gdf.to_file(self.BASE / self.working_site["SITE_NAME"] / "shape_geometries.gpkg", driver="GPKG")
+        
         self.working_site = None
         self.working_datapoint = None
+        self.shape_records = []
         self.image_metadata = self._init_image_metadata()  # Reset image metadata for the next site
-        self.shape_geometries = self._init_shape_geometries()  # Reset shape geometries for the next site
-
+ 
     def save_sites_metadata(self) -> None:
         """Save the sites metadata DataFrame to a CSV file."""
         self.sites_metadata.to_csv(self.BASE / "sites_metadata.csv", index=False)

@@ -2,6 +2,7 @@
 data/*
 *.zip
 training/data
+ML/*
 
 #Python cache files
 __pycache__/

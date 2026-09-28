@@ -1,9 +1,10 @@
 import math
 from typing import Generator
 import rasterio
+import numpy as np
 
-from parameters import DATA_DIR, GEO_CLASS
-from datamanager import Label, SiteData, DataPoint, get_sites
+from parameters import GEO_CLASS
+from datamanager import Label, SiteData, DataPoint
 
 
 def calculate_target_extent(
@@ -68,8 +69,8 @@ def extract_datapoint(
     # Extract RAW source pixels (e.g., 303x303) without out_shape resampling
     window_img = orto_view.read(window=window_view)
 
-    print(f"Extracted raw crop bounds: {desired_bounds}")
-    print(f"Extracted raw pixel shape: {window_img.shape}")
+    if window_img.ndim == 3 and window_img.shape[0] in (1, 3, 4):  # CHW format from rasterio
+        window_img = np.transpose(window_img, (1, 2, 0))  # Convert to HWC format
 
     return DataPoint(
         site_data.name,
