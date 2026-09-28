@@ -55,7 +55,7 @@ def extract_datapoint(site_data: SiteData, orto_view: rasterio.DatasetReader, la
     desired_bounds = scale_bounds(geometry_bounds, window_size, stride, desired_scale)
     print(desired_bounds)
     window_view = rasterio.windows.from_bounds(*desired_bounds, transform=orto_view.transform)
-    window_img = orto_view.read(window=window_view)
+    window_img = orto_view.read(window=window_view, out_shape=(orto_view.count, window_size, window_size))
     print(window_img.shape)
     return DataPoint(site_data.name, label.data_label, label.geometry, site_data.crs, window_img, desired_bounds, site_data.m_px)
 
