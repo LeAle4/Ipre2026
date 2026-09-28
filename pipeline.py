@@ -52,6 +52,7 @@ def main():
         print(f"Processing site: {site.name}")
         for geo_datapoint in get_polygon_imgs(site, window_size, stride, target_scale):
             polygon_boundaries.append(geo_datapoint.polygon_bounds)
+            writer.add_polygon_datapoint(geo_datapoint)
             
             print(f"Processing polygon datapoint: {geo_datapoint.id}")
             resize_datapoint_image(geo_datapoint, target_scale, window_size=window_size, stride=stride)

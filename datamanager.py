@@ -144,6 +144,7 @@ class DataPoint:
         self.name = site_name
         self.data_label = data_label
         self.polygon_bounds = polygon_bounds
+        self.area = polygon_bounds.area
         self.origin_scale = m_px
         self.crs = crs
         self.image = image
@@ -210,11 +211,14 @@ class DataWriter:
                         "CROP_ID",
                         "DATA_LABEL",
                         "SCALE_MPX",
+                        "CENTER_X",
+                        "CENTER_Y",
+                        "AREA",
                         "CHANNELS",
                         "CRS",
                         "THRESHOLD_CLEAR"
                     )
-    SHAPE_GEOMETRIES_COLUMNS = ("SITE_NAME", "ID", "GEO_ID", "DATA_LABEL", "GEOMETRY")
+    SHAPE_GEOMETRIES_COLUMNS = ("SITE_NAME", "ID", "GEO_ID", "AREA", "CENTER_X", "CENTER_Y", "DATA_LABEL", "GEOMETRY")
     GEOMETRY_COLUMN = "GEOMETRY"
 
     def __init__(self, sites_data: dict[str, SiteData]):
@@ -224,6 +228,7 @@ class DataWriter:
         self.working_site = None
         self.working_datapoint = None
         self.shape_records = []
+        self.polygon_records = []
 
         self._ensure_sites_dir()
 
@@ -260,6 +265,47 @@ class DataWriter:
         for site_path in self.site_paths.values():
             site_path.mkdir(parents=True, exist_ok=True)
 
+    def _process_channel_statistics(self, site_data: SiteData) -> dict[str, float]:
+        """Calculate min, max, and average for each channel in the site's TIFF image.
+
+        Args:
+            site_data: The SiteData object for the site.
+
+        Returns:
+            A dictionary containing the min, max, and average values for each channel.
+        """
+        channel_stats = {}
+        with site_data.access_tif() as tif_area:
+            print(f"Calculating channel statistics for site: {site_data.name}")
+
+            for channel in range(1, site_data.channels + 1):
+                print(
+                    f"Processing channel {channel}/{site_data.channels} "
+                    f"for site: {site_data.name}"
+                )
+
+                minimum = np.inf
+                maximum = -np.inf
+                total = 0.0
+                count = 0
+
+                for _, window in tif_area.block_windows(channel):
+                    data = tif_area.read(channel, window=window, masked=True)
+
+                    if data.count() == 0:
+                        continue
+
+                    minimum = min(minimum, float(data.min()))
+                    maximum = max(maximum, float(data.max()))
+                    total += float(data.sum())
+                    count += data.count()
+
+                channel_stats[f"CHANNEL_{channel}_MIN"] = minimum
+                channel_stats[f"CHANNEL_{channel}_MAX"] = maximum
+                channel_stats[f"CHANNEL_{channel}_AVG"] = total / count
+
+        return channel_stats
+
     def start_site(self, site_data: SiteData) -> None:
         """Start processing a new site.
 
@@ -283,15 +329,7 @@ class DataWriter:
         self.working_site["NUMBER_OF_GEOGLYPHS"] = len(labels.filter_class(GEO_CLASS))
         self.working_site["NUMBER_OF_GROUND"] = len(labels.filter_class(GROUND_CLASS))
         self.working_site["CHANNELS"] = site_data.channels
-        # Calculate min, max, and average for each channel
-        with site_data.access_tif() as tif_area:
-            print(f"Calculating channel statistics for site: {site_data.name}")
-            for channel in range(1, site_data.channels + 1):
-                print(f"Processing channel {channel}/{site_data.channels} for site: {site_data.name}")
-                channel_data = tif_area.read(channel)
-                self.working_site[f"CHANNEL_{channel}_MIN"] = np.min(channel_data)
-                self.working_site[f"CHANNEL_{channel}_MAX"] = np.max(channel_data)
-                self.working_site[f"CHANNEL_{channel}_AVG"] = np.mean(channel_data)
+        self.working_site.update(self._process_channel_statistics(site_data))
 
     def add_crop(self, datapoint:DataPoint, crop: Crop | None = None, crop_n:int = 1) -> None:
         """Add a new image datapoint to the metadata.
@@ -320,6 +358,8 @@ class DataWriter:
             "CROP_ID": f"{crop_n:05d}",
             "DATA_LABEL": datapoint.data_label,
             "SCALE_MPX": datapoint.m_px,
+            "CENTER_X": datapoint.image_box.centroid.x,
+            "CENTER_Y": datapoint.image_box.centroid.y,
             "CHANNELS": datapoint.image.shape[2],
             "CRS": datapoint.crs,
             "THRESHOLD_CLEAR": threshold_clear
@@ -330,17 +370,40 @@ class DataWriter:
         elif datapoint.data_label == GROUND_CLASS:
             self.working_site["NUMBER_OF_NEGATIVES"] += 1
 
+        if crop is None:
+            geometry = datapoint.polygon_bounds
+        else:
+            geometry = crop.crop_bounds
+        
         self.shape_records.append({
                     "SITE_NAME": self.working_site["SITE_NAME"],
                     "ID": full_id,
                     "GEO_ID": datapoint.id,
                     "DATA_LABEL": datapoint.data_label,
+                    "AREA": datapoint.area,
+                    "CENTER_X": datapoint.polygon_bounds.centroid.x,
+                    "CENTER_Y": datapoint.polygon_bounds.centroid.y,
                     "THRESHOLD_CLEAR": threshold_clear,
-                    "geometry": datapoint.polygon_bounds
+                    "geometry": geometry,
                 })
 
         img = Image.fromarray(image)
         img.save(self.BASE / self.working_site["SITE_NAME"] / f"{full_id}.png")
+
+    def add_polygon_datapoint(self, datapoint: DataPoint) -> None:
+        """Add a polygon datapoint to the polygon records for the current site.
+
+        Args:
+            datapoint: The DataPoint object representing the polygon.
+        """
+        if self.working_site is None:
+            raise RuntimeError("No site is currently being processed. Call start_site() before adding polygon datapoints.")
+        
+        self.polygon_records.append({
+            "SITE_NAME": self.working_site["SITE_NAME"],
+            "GEO_ID": datapoint.id,
+            "geometry": datapoint.polygon_bounds
+        })
 
     def close_site(self) -> None:
         """Finalize the current site and write its metadata to the sites metadata DataFrame."""
@@ -356,6 +419,13 @@ class DataWriter:
         )
         shape_gdf.to_file(self.BASE / self.working_site["SITE_NAME"] / "shape_geometries.gpkg", driver="GPKG")
         
+        polygon_gdf = gpd.GeoDataFrame(
+            self.polygon_records,
+            geometry="geometry",
+            crs=self.working_site["CRS"]
+        )
+        polygon_gdf.to_file(self.BASE / self.working_site["SITE_NAME"] / "polygon_geometries.gpkg", driver="GPKG")
+
         self.working_site = None
         self.working_datapoint = None
         self.shape_records = []
