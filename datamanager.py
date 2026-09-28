@@ -1,11 +1,11 @@
 from __future__ import annotations
-from operator import index
 
 import numpy as np
 import pandas as pd
-import csv
+from PIL import Image
 from pathlib import Path
 
+from parameters import GEO_CLASS, GROUND_CLASS
 import rasterio
 import geopandas as gpd
 import shapely
@@ -72,7 +72,11 @@ class SiteData:
         self.name = site_name
         self.path = site_path
         self.tiff_path, self.label_path, self.dem_path = self._get_files_paths()
-        self.crs, self.bounds, self.transform, self.is_geographic, self.m_px, self.nodata_value = self._get_tif_data()
+        self.crs, self.bounds, self.transform, self.is_geographic, self.m_px, self.nodata_value, self.channels = self._get_tif_data()
+        self.width = self.bounds.right - self.bounds.left
+        self.height = self.bounds.top - self.bounds.bottom
+        self.width_px, self.height_px = self.width / self.m_px, self.height / self.m_px
+        self.area = self.width * self.height
 
         self.is_metric = not self.is_geographic
 
@@ -103,7 +107,9 @@ class SiteData:
             raise FileNotFoundError(f"Missing required files for site '{self.name}' in path '{self.path}'. Found: tiff={bool(tiff)}, labels={bool(labels)}, dem={bool(dem)}")
         return tiff, labels, dem
 
-    def _get_tif_data(self) -> tuple[rasterio.crs.CRS, rasterio.coords.BoundingBox, rasterio.transform.Affine, bool, float, float]:
+    def _get_tif_data(self) \
+        -> tuple[rasterio.crs.CRS, rasterio.coords.BoundingBox, rasterio.transform.Affine, bool, float, float, int]:
+        
         if self.tiff_path is not None:
             with rasterio.open(self.tiff_path) as dataset:
                 crs = dataset.crs
@@ -111,6 +117,7 @@ class SiteData:
                 transform = dataset.transform
                 is_geographic = dataset.crs.is_geographic
                 nodata = dataset.nodata
+                channels = dataset.count
                 if is_geographic:
                     # If the CRS is geographic, we need to calculate the pixel size in meters
                     # using the latitude of the area (assuming it's near the equator for simplicity)
@@ -122,7 +129,7 @@ class SiteData:
                     pixel_size_x = abs(dataset.transform.a)
                     pixel_size_y = abs(dataset.transform.e)
                     m_px = (pixel_size_x + pixel_size_y) / 2
-        return crs, bounds, transform, is_geographic, m_px, nodata
+        return crs, bounds, transform, is_geographic, m_px, nodata, channels
 
     def __str__(self):
         return f"SiteData(site_name={self.name}, site_path={self.path}, tiff_path={self.tiff_path}, label_path={self.label_path}, dem_path={self.dem_path})"
@@ -177,25 +184,9 @@ class Crop:
 
 class DataWriter:
     BASE = Path("ML")
-    WRITE_BUFFER_SIZE = 100  # Number of entries to buffer before writing to CSV
-
-    def __init__(self, sites_data: dict[str, SiteData]):
-        self.site_paths = {site_name: self.BASE / site_name for site_name in sites_data.keys()}
-        self.sites_metadata_path = self.BASE / "sites_metadata.csv"
-        self.image_metadata_path = self.BASE / "image_metadata.csv"
-        self.sites_metadata, self.image_metadata, self.shape_geometries = self._initialize_metadata()
-        self.write_buffer = 0
-
-        self._ensure_sites_dir()
-
-    def _initialize_metadata(self) -> tuple[pd.DataFrame, pd.DataFrame, gpd.GeoDataFrame]:
-
-        sites_metadata = pd.DataFrame(
-            columns=["SITE_NAME", 
+    SITE_COLUMNS = ("SITE_NAME", 
                         "CRS", 
-                        "QUAD_AREA", 
-                        "QUAD_CENTER_LATITUDE", 
-                        "QUAD_CENTER_LONGITUDE", 
+                        "QUAD_AREA",
                         "QUAD_WIDTH_PX", 
                         "QUAD_HEIGHT_PX", 
                         "QUAD_WIDTH_M", 
@@ -204,6 +195,9 @@ class DataWriter:
                         "NUMBER_OF_LABELS",
                         "NUMBER_OF_GEOGLYPHS",
                         "NUMBER_OF_GROUND",
+                        "NUMBER_OF_IMAGES",
+                        "NUMBER_OF_POSITIVES",
+                        "NUMBER_OF_NEGATIVES",
                         "CHANNELS",
                         "CHANNEL_1_MIN",
                         "CHANNEL_1_MAX",
@@ -217,27 +211,51 @@ class DataWriter:
                     "CHANNEL_4_MIN",
                     "CHANNEL_4_MAX",
                     "CHANNEL_4_AVG",
-                    ]
-                        )
-
-        image_metadata = pd.DataFrame(
-            columns=["SITE_NAME",
+                    )
+    IMG_COLUMNS = ("SITE_NAME",
                         "ID",
                         "GEO_ID",
                         "CROP_ID",
                         "DATA_LABEL",
-                        "TOTAL_CROP_COUNT",
                         "SCALE_MPX",
                         "CHANNELS",
                         "CRS",
                         "THRESHOLD_CLEAR"
-                    ]
-            )
+                    )
+    SHAPE_GEOMETRIES_COLUMNS = ("SITE_NAME", "ID", "GEO_ID", "DATA_LABEL", "GEOMETRY")
+    GEOMETRY_COLUMN = "GEOMETRY"
 
-        shape_geometries = gpd.GeoDataFrame(
-            columns=["SITE_NAME", "ID", "GEO_ID", "DATA_LABEL", "GEOMETRY"], geometry="GEOMETRY")
+    def __init__(self, sites_data: dict[str, SiteData]):
+        self.site_paths = {site_name: self.BASE / site_name for site_name in sites_data.keys()}
+        self.sites_metadata = self._init_sites_metadata()
+        self.image_metadata = self._init_image_metadata()
+        self.shape_geometries = self._init_shape_geometries()
+        self.working_site = None
+        self.working_datapoint = None
 
-        return sites_metadata, image_metadata, shape_geometries
+        self._ensure_sites_dir()
+
+    @property
+    def positive_count(self) -> int:
+        """Return the number of positive samples in the image metadata."""
+        return len(self.image_metadata[self.image_metadata["DATA_LABEL"] == GEO_CLASS])
+
+    @property
+    def negative_count(self) -> int:
+        """Return the number of negative samples in the image metadata."""
+        return len(self.image_metadata[self.image_metadata["DATA_LABEL"] == GROUND_CLASS])
+
+    def _init_sites_metadata(self) -> pd.DataFrame:
+        """Initialize the sites metadata DataFrame with the appropriate columns."""
+        return pd.DataFrame(columns=DataWriter.SITE_COLUMNS)
+
+    def _init_image_metadata(self) -> pd.DataFrame:
+        """Initialize the image metadata DataFrame with the appropriate columns."""
+        return pd.DataFrame(columns=DataWriter.IMG_COLUMNS)
+
+    def _init_shape_geometries(self) -> gpd.GeoDataFrame:
+        """Initialize the shape geometries GeoDataFrame with the appropriate columns."""
+        return gpd.GeoDataFrame(columns=DataWriter.SHAPE_GEOMETRIES_COLUMNS, geometry=DataWriter.GEOMETRY_COLUMN)
 
     def _construct_full_id(self, site_name:str, data_point: DataPoint, crop: Crop | None) -> str:
         """Construct a full ID string for the data point or crop.
@@ -249,38 +267,111 @@ class DataWriter:
         """
         return f"{site_name}_{data_point.id}" + (f"_{crop.id}" if crop else "_0")
 
-    def _flush_images(self) -> None:
-        """Write the metadata DataFrames to CSV files."""
-        self.sites_metadata.to_csv(self.sites_metadata_path, index=False)
-        self.image_metadata.to_csv(self.image_metadata_path, index=False)
-        self.shape_geometries.to_file(self.BASE / "shape_geometries.gpkg", driver="GPKG")
-        self.write_buffer = 0
-
-    def close(self) -> None:
-        pass
-
     def _ensure_sites_dir(self) -> None:
         """Ensure that the directories for all sites exist."""
         for site_path in self.site_paths.values():
             site_path.mkdir(parents=True, exist_ok=True)
 
-    def open_data_point(self, site_name:str, data_point: DataPoint) -> None:
-        """Open a new data point for writing crops and metadata.
+    def start_site(self, site_data: SiteData) -> None:
+        """Start processing a new site.
 
         Args:
-            site_name: The name of the site.
-            data_point: The DataPoint object.
+            site_data: The SiteData object for the site.
         """
-        pass
+        self.working_site = {}
+        self.working_site["SITE_NAME"] = site_data.name
+        self.working_site["CRS"] = site_data.crs.to_string()
+        self.working_site["QUAD_AREA"] = site_data.area
+        self.working_site["QUAD_WIDTH_PX"] = site_data.width_px
+        self.working_site["QUAD_HEIGHT_PX"] = site_data.height_px
+        self.working_site["QUAD_WIDTH_M"] = site_data.width
+        self.working_site["QUAD_HEIGHT_M"] = site_data.height
+        self.working_site["SCALE_MPX"] = site_data.m_px
+        self.working_site["NUMBER_OF_IMAGES"] = 0
+        self.working_site["NUMBER_OF_POSITIVES"] = 0
+        self.working_site["NUMBER_OF_NEGATIVES"] = 0
+        labels = site_data.label_data()
+        self.working_site["NUMBER_OF_LABELS"] = len(labels)
+        self.working_site["NUMBER_OF_GEOGLYPHS"] = len(labels.filter_class(GEO_CLASS))
+        self.working_site["NUMBER_OF_GROUND"] = len(labels.filter_class(GROUND_CLASS))
+        self.working_site["CHANNELS"] = site_data.channels
+        # Calculate min, max, and average for each channel
+        with site_data.access_tif() as tif_area:
+            print(f"Calculating channel statistics for site: {site_data.name}")
+            for channel in range(1, site_data.channels + 1):
+                print(f"Processing channel {channel}/{site_data.channels} for site: {site_data.name}")
+                channel_data = tif_area.read(channel)
+                self.working_site[f"CHANNEL_{channel}_MIN"] = np.min(channel_data)
+                self.working_site[f"CHANNEL_{channel}_MAX"] = np.max(channel_data)
+                self.working_site[f"CHANNEL_{channel}_AVG"] = np.mean(channel_data)
 
-    def close_data_point(self, site_name:str, data_point: DataPoint) -> None:
-        """Close the current data point and flush metadata if necessary.
+    def add_crop(self, datapoint:DataPoint, crop: Crop | None = None) -> None:
+        """Add a new image datapoint to the metadata.
 
         Args:
-            site_name: The name of the site.
-            data_point: The DataPoint object.
+            datapoint: The DataPoint object.
+            crop: The Crop object (optional).
+            threshold_clear: The threshold clear value for the image.
         """
-        pass
+        if self.working_site is None:
+            raise RuntimeError("No site is currently being processed. Call start_site() before adding images.")
+        
+        full_id = self._construct_full_id(self.working_site["SITE_NAME"], datapoint, crop)
+        
+        if crop is None:
+            threshold_clear = 1.0
+            crop_id = f"{0:05d}"
+            image = datapoint.image
+        else:
+            threshold_clear = crop.intersection_proportion
+            crop_id = crop.id
+            image = crop.crop_image
+
+        self.image_metadata.loc[len(self.image_metadata)] = {
+            "SITE_NAME": self.working_site["SITE_NAME"],
+            "ID": full_id,
+            "GEO_ID": datapoint.id,
+            "CROP_ID": crop_id,
+            "DATA_LABEL": datapoint.data_label,
+            "SCALE_MPX": datapoint.m_px,
+            "CHANNELS": datapoint.image.shape[2],
+            "CRS": datapoint.crs,
+            "THRESHOLD_CLEAR": threshold_clear
+        }
+        self.working_site["NUMBER_OF_IMAGES"] += 1
+        if datapoint.data_label == GEO_CLASS:
+            self.working_site["NUMBER_OF_POSITIVES"] += 1
+        elif datapoint.data_label == GROUND_CLASS:
+            self.working_site["NUMBER_OF_NEGATIVES"] += 1
+
+        self.shape_geometries.loc[len(self.shape_geometries)] = {
+            "SITE_NAME": self.working_site["SITE_NAME"],
+            "ID": full_id,
+            "GEO_ID": datapoint.id,
+            "DATA_LABEL": datapoint.data_label,
+            "GEOMETRY": datapoint.polygon_bounds
+        }
+
+        img = Image.fromarray(image)
+        img.save(self.BASE / self.working_site["SITE_NAME"] / f"{full_id}.png")
+
+    def close_site(self) -> None:
+        """Finalize the current site and write its metadata to the sites metadata DataFrame."""
+        if self.working_site is None:
+            raise RuntimeError("No site is currently being processed. Call start_site() before closing a site.")
+        
+        self.sites_metadata.loc[len(self.sites_metadata)] = self.working_site
+        self.image_metadata.to_csv(self.BASE / self.working_site["SITE_NAME"] / "image_metadata.csv", index=False)
+        self.shape_geometries.to_file(self.BASE / self.working_site["SITE_NAME"] / "shape_geometries.gpkg", driver="GPKG")
+
+        self.working_site = None
+        self.working_datapoint = None
+        self.image_metadata = self._init_image_metadata()  # Reset image metadata for the next site
+        self.shape_geometries = self._init_shape_geometries()  # Reset shape geometries for the next site
+
+    def save_sites_metadata(self) -> None:
+        """Save the sites metadata DataFrame to a CSV file."""
+        self.sites_metadata.to_csv(self.BASE / "sites_metadata.csv", index=False)
 
 def get_sites(data_path:Path) -> dict[str, SiteData]:
     """Get a list of SiteData objects for each site in the data path.

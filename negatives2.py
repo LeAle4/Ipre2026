@@ -62,13 +62,12 @@ def generate_negative_img(
 
     raise RuntimeError(f"Could not find a valid data window after {max_attempts} attempts.")
 
-def generate_negative_samples(site_data:SiteData, num_positive_samples: int, window_size: int = DEFAULT_WINDOW_SIZE, desired_scale:float = DEFAULT_TARGET_SCALE) -> Generator[DataPoint, None, None]:
+def generate_negative_samples(site_data:SiteData, num_positive_samples: int, window_size: int = DEFAULT_WINDOW_SIZE, desired_scale:float = DEFAULT_TARGET_SCALE, negative_ratio: float = DEFAULT_NEGATIVES_RATIO) -> Generator[DataPoint, None, None]:
     """Calculate the number of negative samples to generate based on the number of positive samples."""
-    num_to_generate = int(num_positive_samples * DEFAULT_NEGATIVES_RATIO)
+    num_to_generate = int(num_positive_samples * negative_ratio)
 
     with site_data.access_tif() as tif_area:
         for n in range(num_to_generate):
-           print(f"Generating negative sample {n+1}/{num_to_generate} for site {site_data.name}")
            img, bounds = generate_negative_img(tif_area, site_data.m_px, window_size, desired_scale)
            datapoint = DataPoint(site_data.name, GROUND_CLASS, shapely.geometry.box(*bounds), site_data.crs, img, bounds, site_data.m_px)
            resize_datapoint_image(datapoint, desired_scale)
