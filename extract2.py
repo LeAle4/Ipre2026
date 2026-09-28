@@ -67,10 +67,7 @@ def extract_datapoint(
     window_view = rasterio.windows.from_bounds(*desired_bounds, transform=orto_view.transform)
 
     # Extract RAW source pixels (e.g., 303x303) without out_shape resampling
-    window_img = orto_view.read(window=window_view)
-
-    if window_img.ndim == 3 and window_img.shape[0] in (1, 3, 4):  # CHW format from rasterio
-        window_img = np.transpose(window_img, (1, 2, 0))  # Convert to HWC format
+    window_img = orto_view.read(window=window_view, out_shape=(orto_view.count, int(window_view.height), int(window_view.width)))
 
     return DataPoint(
         site_data.name,

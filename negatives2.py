@@ -18,7 +18,7 @@ def in_actual_data(tif_area, view_window:rasterio.windows.Window, no_data_value,
         no_data_value: Cached nodata value from tif_area.nodata.
         threshold: Minimum fraction of valid data required (0-1).
     """
-    data = tif_area.read(1, window=view_window)
+    data = tif_area.read(1, window=view_window, out_shape=(tif_area.count, int(view_window.height), int(view_window.width)))
     
     # If nodata is defined, use it
     if no_data_value is not None:
@@ -56,7 +56,7 @@ def generate_negative_img(
 
         if in_actual_data(tif_area, window, tif_area.nodata, threshold=0.99):
             # Extract raw unscaled pixels (e.g., 1120x1120) for resize2.py to process later
-            img = tif_area.read(window=window)
+            img = tif_area.read(window=window, out_shape=(tif_area.count, int(window.height), int(window.width)))
             bounds = tif_area.window_bounds(window)
             return img, bounds
 
