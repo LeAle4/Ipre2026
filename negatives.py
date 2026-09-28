@@ -4,8 +4,8 @@ import random
 import rasterio
 import shapely
 import numpy as np
-from resize2 import resize_datapoint_image
-from extract2 import scale_bounds
+from resize import resize_datapoint_image
+from extract import scale_bounds
 from datamanager import SiteData, DataPoint
 from parameters import DEFAULT_NEGATIVES_RATIO, DEFAULT_TARGET_SCALE, DEFAULT_WINDOW_SIZE, GROUND_CLASS
 
