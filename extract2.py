@@ -68,7 +68,8 @@ def extract_datapoint(
 
     # Extract RAW source pixels (e.g., 303x303) without out_shape resampling
     window_img = orto_view.read(window=window_view, out_shape=(orto_view.count, int(window_view.height), int(window_view.width)))
-
+    window_img = np.transpose(window_img, (1, 2, 0))  # Convert to HWC format
+    print(window_img.shape)
     return DataPoint(
         site_data.name,
         label.data_label,

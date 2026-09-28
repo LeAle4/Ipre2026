@@ -1,9 +1,3 @@
-import geopandas as gpd
-import shapely
-import numpy as np
-from pathlib import Path
-from PIL import Image
-
 from extract2 import get_polygon_imgs
 from resize2 import resize_datapoint_image
 from crop2 import generate_crops
@@ -21,7 +15,7 @@ def main():
         print(f"Processing site: {site.name}")
         for geo_datapoint in get_polygon_imgs(site, DEFAULT_WINDOW_SIZE, DEFAULT_STRIDE, DEFAULT_TARGET_SCALE):
             print(f"Processing polygon datapoint: {geo_datapoint.id}")
-            resize_datapoint_image(geo_datapoint, DEFAULT_TARGET_SCALE)
+            resize_datapoint_image(geo_datapoint, DEFAULT_TARGET_SCALE, window_size=DEFAULT_WINDOW_SIZE, stride=DEFAULT_STRIDE)
             print(f"Resized polygon datapoint: {geo_datapoint.id} to scale {DEFAULT_TARGET_SCALE}.")
             for n, crop in enumerate(generate_crops(geo_datapoint, DEFAULT_WINDOW_SIZE, DEFAULT_STRIDE, threshold=DEFAULT_THRESHOLD_CROP_CONTENT)):
                 print(f"Processing crop N°{n} for {geo_datapoint.id}")

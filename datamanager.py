@@ -147,10 +147,6 @@ class DataPoint:
         self.origin_scale = m_px
         self.crs = crs
         self.image = image
-        #image shape given is (channels, height, width) but we want to store it as (height, width, channels)
-        if len(self.image.shape) == 3:
-            self.image = np.transpose(self.image, (1, 2, 0))
-
         self.image_box = shapely.box(*image_bounds)
         self.m_px = m_px
         self.image_resized = False
@@ -249,15 +245,15 @@ class DataWriter:
         """Initialize the image metadata DataFrame with the appropriate columns."""
         return pd.DataFrame(columns=DataWriter.IMG_COLUMNS)
 
-    def _construct_full_id(self, site_name:str, data_point: DataPoint, crop: Crop | None) -> str:
+    def _construct_full_id(self, site_name:str, data_point: DataPoint, crop_number:int) -> str:
         """Construct a full ID string for the data point or crop.
 
         Args:
             site_name: The name of the site.
             data_point: The DataPoint object.
-            crop: The Crop object (optional).
+            crop_number: The number of the crop.
         """
-        return f"{site_name}_{data_point.id}" + (f"_{crop.id}" if crop else "_0")
+        return f"{site_name}_{data_point.id}" + (f"_{crop_number}" )
 
     def _ensure_sites_dir(self) -> None:
         """Ensure that the directories for all sites exist."""
@@ -308,7 +304,7 @@ class DataWriter:
         if self.working_site is None:
             raise RuntimeError("No site is currently being processed. Call start_site() before adding images.")
         
-        full_id = self._construct_full_id(self.working_site["SITE_NAME"], datapoint, crop)
+        full_id = self._construct_full_id(self.working_site["SITE_NAME"], datapoint, crop_n)
         
         if crop is None:
             threshold_clear = 1.0

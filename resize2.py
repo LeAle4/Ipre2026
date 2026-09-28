@@ -1,11 +1,8 @@
-from typing import Generator
-
-import rasterio
 import numpy as np
 from scipy.fft import idct
 
-from parameters import DATA_DIR, GEO_CLASS
-from datamanager import Label, SiteData, DataPoint, get_sites
+from datamanager import DataPoint
+from parameters import DEFAULT_WINDOW_SIZE, DEFAULT_STRIDE
 
 def lci(I_in, *args):
     """
@@ -92,23 +89,42 @@ def lci(I_in, *args):
 
     return I_fin
 
-def resize_datapoint_image(datapoint: DataPoint, desired_metric_scale: float) -> None:
-    """
-    Resize the image of a DataPoint to the desired window size and metric scale.
 
-    Args:
-        datapoint: The DataPoint object whose image is to be resized.
-        desired_metric_scale: The desired scale of the image in meters per pixel.
+def snap_to_crop_grid(dim_px: float, window_size: int, stride: int) -> int:
+    """Snaps calculated pixel dimensions to the nearest target grid size:
+
+    window_size + k * stride (for k >= 0).
     """
-    # Calculate the scaling factor based on the current and desired metric scales
+    if dim_px <= window_size:
+        return window_size
+
+    # Find the nearest integer step k
+    k = max(0, round((dim_px - window_size) / stride))
+    return window_size + k * stride
+
+
+def resize_datapoint_image(
+    datapoint: DataPoint, 
+    desired_metric_scale: float,
+    window_size: int = DEFAULT_WINDOW_SIZE,
+    stride: int = DEFAULT_STRIDE
+) -> None:
+    """Resize the image of a DataPoint using LCI, snapping dimensions to 
+
+    exact sliding window grid sizes.
+    """
     scaling_factor = datapoint.m_px / desired_metric_scale
 
-    # Calculate the new dimensions for the image
-    new_height = int(datapoint.image.shape[0] * scaling_factor)
-    new_width = int(datapoint.image.shape[1] * scaling_factor)
+    raw_height = datapoint.image.shape[0] * scaling_factor
+    raw_width = datapoint.image.shape[1] * scaling_factor
 
-    # Resize the image using Lagrange-Chebyshev Interpolation (LCI)
+    # Snap raw dimensions to exact multiples required by view_as_windows
+    # We lose a little bif of precision in the scaling factor, 
+    # but this is necessary to ensure that the sliding window crops align perfectly with the resized image.
+    new_height = snap_to_crop_grid(raw_height, window_size, stride)
+    new_width = snap_to_crop_grid(raw_width, window_size, stride)
+
+    # Resize the image directly to snapped dimensions
     resized_image = lci(datapoint.image, new_height, new_width)
     
-    # Update the DataPoint with the resized image and mark it as resized
     datapoint.modify_image(resized_image, desired_metric_scale)

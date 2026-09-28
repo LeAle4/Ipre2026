@@ -44,13 +44,10 @@ def generate_crops(
     """Generate crops from the data point's image along with matching geographic bounding boxes."""
     image = data_point.image
 
-    # Ensure image is in (Height, Width, Channels) for view_as_windows
-    if image.ndim == 3 and image.shape[0] in (1, 3, 4):  # CHW format from rasterio
-        image = np.transpose(image, (1, 2, 0))
-
     height, width, channels = image.shape
 
     # 1. Slide window over image array (Row-Major: Y then X)
+    print(f"Generating crops for DataPoint {data_point.id} with image shape {image.shape}, window_size={window_size}, stride={stride}")
     possible_img_crops = view_as_windows(
         image,
         window_shape=(window_size, window_size, channels),
