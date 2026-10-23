@@ -1,3 +1,4 @@
+import math
 import numpy as np
 from scipy.fft import idct
 
@@ -89,6 +90,69 @@ def lci(I_in, *args):
 
     return I_fin
 
+def area_weighted_resize(image: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
+    """Resize *image* via area-weighted averaging (box / bin-averaging).
+
+    This is the physically correct downsampling method for imagery:
+    each output pixel is the weighted mean of all source pixels it
+    overlaps, preserving radiometric fidelity without Gibbs ringing.
+
+    Parameters
+    ----------
+    image : ndarray, shape (H, W) or (H, W, C)
+        Input image, any numeric dtype.  Output is uint8.
+    target_h, target_w : int
+        Target spatial dimensions.
+
+    Returns
+    -------
+    ndarray, shape (target_h, target_w[, C]), dtype uint8
+    """
+    src_h, src_w = image.shape[:2]
+    is_color = image.ndim == 3
+    n_channels = image.shape[2] if is_color else 1
+
+    if not is_color:
+        image = image[:, :, np.newaxis]
+
+    img = image.astype(np.float64)
+    out = np.empty((target_h, target_w, n_channels), dtype=np.float64)
+
+    # Scale ratios (source pixels per output pixel)
+    sy = src_h / target_h
+    sx = src_w / target_w
+
+    for oy in range(target_h):
+        # Source y-interval covered by this output row
+        y0 = oy * sy
+        y1 = y0 + sy
+        iy0 = int(math.floor(y0))
+        iy1 = min(int(math.ceil(y1)), src_h)
+
+        for ox in range(target_w):
+            x0 = ox * sx
+            x1 = x0 + sx
+            ix0 = int(math.floor(x0))
+            ix1 = min(int(math.ceil(x1)), src_w)
+
+            # Accumulate weighted sum over source block
+            total_weight = 0.0
+            accum = np.zeros(n_channels, dtype=np.float64)
+
+            for iy in range(iy0, iy1):
+                wy = min(y1, iy + 1) - max(y0, iy)  # vertical overlap
+                for ix in range(ix0, ix1):
+                    wx = min(x1, ix + 1) - max(x0, ix)  # horizontal overlap
+                    w = wy * wx
+                    accum += img[iy, ix, :] * w
+                    total_weight += w
+
+            out[oy, ox, :] = accum / total_weight if total_weight > 0 else 0.0
+
+    result = np.clip(np.rint(out), 0, 255).astype(np.uint8)
+    if not is_color:
+        result = result[:, :, 0]
+    return result
 
 def snap_to_crop_grid(dim_px: float, window_size: int, stride: int) -> int:
     """Snaps calculated pixel dimensions to the nearest target grid size:
@@ -107,24 +171,48 @@ def resize_datapoint_image(
     datapoint: DataPoint, 
     desired_metric_scale: float,
     window_size: int = DEFAULT_WINDOW_SIZE,
-    stride: int = DEFAULT_STRIDE
+    stride: int = DEFAULT_STRIDE,
+    resize_fn = area_weighted_resize
 ) -> None:
-    """Resize the image of a DataPoint using LCI, snapping dimensions to 
+    """Resize the image of a DataPoint to the target metric scale.
 
-    exact sliding window grid sizes.
+    The extracted datapoint's image bounds are expected to be already snapped to the
+    sliding window grid (window_size + k * stride) during extraction. This function
+    verifies that precondition and resizes the image directly to those dimensions
+    without performing any snapping.
+
+    Parameters
+    ----------
+    datapoint : DataPoint
+        The datapoint to resize.
+    desired_metric_scale : float
+        Target resolution in m/px.
+    window_size : int, optional
+        Window size in pixels for grid validation.
+    stride : int, optional
+        Stride in pixels for grid validation.
+    resize_fn : callable(image, target_h, target_w) -> ndarray, optional
+        Resampling function. Defaults to area_weighted_resize.
     """
-    scaling_factor = datapoint.m_px / desired_metric_scale
+    # Target dimensions derived directly from the extracted bounding box
+    minx, miny, maxx, maxy = datapoint.image_box.bounds
+    target_w = int(round((maxx - minx) / desired_metric_scale))
+    target_h = int(round((maxy - miny) / desired_metric_scale))
 
-    raw_height = datapoint.image.shape[0] * scaling_factor
-    raw_width = datapoint.image.shape[1] * scaling_factor
+    # Check for the condition: target dimensions must already be snapped
+    if target_w < window_size or (target_w - window_size) % stride != 0:
+        raise ValueError(
+            f"Extracted datapoint width ({target_w} px) is not snapped to crop grid: "
+            f"expected window_size ({window_size}) + k * stride ({stride})."
+        )
+    if target_h < window_size or (target_h - window_size) % stride != 0:
+        raise ValueError(
+            f"Extracted datapoint height ({target_h} px) is not snapped to crop grid: "
+            f"expected window_size ({window_size}) + k * stride ({stride})."
+        )
 
-    # Snap raw dimensions to exact multiples required by view_as_windows
-    # We lose a little bif of precision in the scaling factor, 
-    # but this is necessary to ensure that the sliding window crops align perfectly with the resized image.
-    new_height = snap_to_crop_grid(raw_height, window_size, stride)
-    new_width = snap_to_crop_grid(raw_width, window_size, stride)
-
-    # Resize the image directly to snapped dimensions
-    resized_image = lci(datapoint.image, new_height, new_width)
+    # Resize directly to target dimensions without snapping
+    resized_image = resize_fn(datapoint.image, target_h, target_w)
     
+    # Update image and metric scale
     datapoint.modify_image(resized_image, desired_metric_scale)

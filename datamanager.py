@@ -1,4 +1,5 @@
-from __future__ import annotations
+import warnings
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -10,6 +11,67 @@ import rasterio
 import geopandas as gpd
 import shapely
 from shapely.geometry.multipolygon import MultiPolygon
+
+TARGET_UTM_EPSG = 32719  # WGS 84 / UTM Zone 19S
+
+
+def validate_crs(crs: rasterio.crs.CRS, *, expected_epsg: int = TARGET_UTM_EPSG) -> bool:
+    """Return True if *crs* matches the expected metric projection.
+
+    If the CRS is geographic (lat/lon degrees), a warning is emitted.
+    """
+    if crs.is_geographic:
+        warnings.warn(
+            f"Input CRS ({crs}) is geographic (degrees). "
+            f"All metric computations will be approximate. "
+            f"Consider reprojecting to EPSG:{expected_epsg} before running "
+            f"the pipeline (e.g. `gdalwarp -t_srs EPSG:{expected_epsg}`).",
+            stacklevel=2,
+        )
+        return False
+
+    epsg = crs.to_epsg()
+    if epsg is not None and epsg != expected_epsg:
+        warnings.warn(
+            f"Input CRS is EPSG:{epsg}, expected EPSG:{expected_epsg}. "
+            f"Metric computations may be inconsistent across sites.",
+            stacklevel=2,
+        )
+        return False
+
+    return True
+
+
+class PixelScale(NamedTuple):
+    """Meters per pixel along each axis."""
+    x: float
+    y: float
+
+    @property
+    def mean(self) -> float:
+        return (self.x + self.y) / 2.0
+
+    @property
+    def is_isotropic(self, tol: float = 1e-9) -> bool:
+        return abs(self.x - self.y) < tol
+
+
+def get_pixel_scale(dataset: rasterio.DatasetReader) -> PixelScale:
+    """Extract per-axis pixel size in metres from a rasterio dataset.
+
+    For geographic CRS, converts degrees -> metres using latitude-dependent
+    scaling (kept per-axis).
+    """
+    dx = abs(dataset.transform.a)
+    dy = abs(dataset.transform.e)
+
+    if dataset.crs.is_geographic:
+        lat = dataset.bounds.top
+        dx_m = dx * (111320 * np.cos(np.radians(lat)))
+        dy_m = dy * 111320
+        return PixelScale(x=dx_m, y=dy_m)
+
+    return PixelScale(x=dx, y=dy)
 
 class Label:
     def __init__(self, fid:int, data_label:int, area:float, length:float, geometry: MultiPolygon, is_metric:bool):
@@ -72,13 +134,19 @@ class SiteData:
         self.name = site_name
         self.path = site_path
         self.tiff_path, self.label_path, self.dem_path = self._get_files_paths()
-        self.crs, self.bounds, self.transform, self.is_geographic, self.m_px, self.nodata_value, self.channels = self._get_tif_data()
+        self.crs, self.bounds, self.transform, self.is_geographic, self.pixel_scale, self.nodata_value, self.channels = self._get_tif_data()
+        # Factor 4: preserve independent X/Y pixel dimensions
+        self.m_px_x = self.pixel_scale.x
+        self.m_px_y = self.pixel_scale.y
+        self.m_px = self.pixel_scale.mean  # backward-compatible scalar
         self.width = self.bounds.right - self.bounds.left
         self.height = self.bounds.top - self.bounds.bottom
-        self.width_px, self.height_px = self.width / self.m_px, self.height / self.m_px
+        self.width_px, self.height_px = self.width / self.m_px_x, self.height / self.m_px_y
         self.area = self.width * self.height
 
         self.is_metric = not self.is_geographic
+        # Factor 1: validate CRS at load time
+        validate_crs(self.crs)
 
     def access_tif(self) -> rasterio.DatasetReader:
         return rasterio.open(self.tiff_path)
@@ -108,7 +176,7 @@ class SiteData:
         return tiff, labels, dem
 
     def _get_tif_data(self) \
-        -> tuple[rasterio.crs.CRS, rasterio.coords.BoundingBox, rasterio.transform.Affine, bool, float, float, int]:
+        -> tuple[rasterio.crs.CRS, rasterio.coords.BoundingBox, rasterio.transform.Affine, bool, PixelScale, float, int]:
         
         if self.tiff_path is not None:
             with rasterio.open(self.tiff_path) as dataset:
@@ -118,18 +186,9 @@ class SiteData:
                 is_geographic = dataset.crs.is_geographic
                 nodata = dataset.nodata
                 channels = dataset.count
-                if is_geographic:
-                    # If the CRS is geographic, we need to calculate the pixel size in meters
-                    # using the latitude of the area (assuming it's near the equator for simplicity)
-                    lat = dataset.bounds.top  # Use the top latitude of the dataset
-                    pixel_size_x = abs(dataset.transform.a) * (111320 * np.cos(np.radians(lat)))  # Convert degrees to meters
-                    pixel_size_y = abs(dataset.transform.e) * 111320  # Convert degrees to meters
-                    m_px = (pixel_size_x + pixel_size_y) / 2
-                else:
-                    pixel_size_x = abs(dataset.transform.a)
-                    pixel_size_y = abs(dataset.transform.e)
-                    m_px = (pixel_size_x + pixel_size_y) / 2
-        return crs, bounds, transform, is_geographic, m_px, nodata, channels
+                # Factor 4: independent X/Y pixel dimensions
+                pixel_scale = get_pixel_scale(dataset)
+        return crs, bounds, transform, is_geographic, pixel_scale, nodata, channels
 
     def __str__(self):
         return f"SiteData(site_name={self.name}, site_path={self.path}, tiff_path={self.tiff_path}, label_path={self.label_path}, dem_path={self.dem_path})"
@@ -138,34 +197,87 @@ class DataPoint:
 
     last_id = 0
 
-    def __init__(self, site_name:str, data_label: int, polygon_bounds: MultiPolygon, crs:str, image:np.ndarray, image_bounds: tuple[float, float, float, float], m_px: float):
+    def __init__(
+        self,
+        site_name: str,
+        data_label: int,
+        polygon_bounds: MultiPolygon,
+        crs: str,
+        image: np.ndarray,
+        image_bounds: tuple[float, float, float, float],
+        m_px: float | PixelScale | None = None,
+        m_px_x: float | None = None,
+        m_px_y: float | None = None,
+    ):
         self.id = f"{DataPoint.last_id:05d}"
         DataPoint.last_id += 1
         self.name = site_name
         self.data_label = data_label
         self.polygon_bounds = polygon_bounds
         self.area = polygon_bounds.area
-        self.origin_scale = m_px
         self.crs = crs
         self.image = image
         self.image_box = shapely.box(*image_bounds)
-        self.m_px = m_px
         self.image_resized = False
+
+        # Resolve anisotropic pixel scales
+        if isinstance(m_px, PixelScale):
+            self.m_px_x = m_px.x
+            self.m_px_y = m_px.y
+            self.m_px = m_px.mean
+        elif m_px_x is not None and m_px_y is not None:
+            self.m_px_x = m_px_x
+            self.m_px_y = m_px_y
+            self.m_px = (m_px_x + m_px_y) / 2.0 if m_px is None else m_px
+        elif isinstance(m_px, (tuple, list)):
+            self.m_px_x = m_px[0]
+            self.m_px_y = m_px[1]
+            self.m_px = (m_px[0] + m_px[1]) / 2.0
+        else:
+            scale_val = m_px if m_px is not None else 1.0
+            self.m_px_x = scale_val if m_px_x is None else m_px_x
+            self.m_px_y = scale_val if m_px_y is None else m_px_y
+            self.m_px = scale_val
+
+        self.origin_scale = self.m_px
+        self.origin_scale_x = self.m_px_x
+        self.origin_scale_y = self.m_px_y
+
+    def update_image_box(self, desired_scale: float) -> None:
+        """Recompute self.image_box from the current image dimensions.
+
+        Keeps the center fixed and adjusts bounds symmetrically to match
+        the post-resize image array dimensions at the given metric scale.
+        """
+        h, w = self.image.shape[:2]
+        old_minx, old_miny, old_maxx, old_maxy = self.image_box.bounds
+        cx = (old_minx + old_maxx) / 2.0
+        cy = (old_miny + old_maxy) / 2.0
+        half_w = (w * desired_scale) / 2.0
+        half_h = (h * desired_scale) / 2.0
+        self.image_box = shapely.box(cx - half_w, cy - half_h, cx + half_w, cy + half_h)
 
     def modify_image(self, new_image: np.ndarray, new_scale: float) -> None:
         """Modify the image of the DataPoint and update its bounds and metric scale.
 
         Args:
             new_image: The new image to replace the current one.
-            new_bounds: The new bounds of the image in the format (minx, miny, maxx, maxy).
-            new_m_px: The new metric scale in meters per pixel.
+            new_scale: The new metric scale in meters per pixel.
         """
         self.image = new_image
         self.m_px = new_scale
+        self.m_px_x = new_scale
+        self.m_px_y = new_scale
         self.image_resized = True
+        self.update_image_box(new_scale)
 
     def __str__(self):
-        return f"DataPoint(site_name={self.name}, label={self.data_label}, polygon_bounds={self.polygon_bounds}, image_shape={self.image.shape}, bounds={self.image_box.bounds}, m_px={self.m_px})"
+        return f"DataPoint(site_name={self.name}, label={self.data_label}, polygon_bounds={self.polygon_bounds}, image_shape={self.image.shape}, bounds={self.image_box.bounds}, m_px={self.m_px}, m_px_x={self.m_px_x}, m_px_y={self.m_px_y})"
+
+
+def update_image_box_from_image(datapoint: DataPoint, desired_scale: float) -> None:
+    """Module-level alias for datapoint.update_image_box."""
+    datapoint.update_image_box(desired_scale)
 
 class Crop:
 

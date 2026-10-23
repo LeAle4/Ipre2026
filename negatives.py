@@ -73,7 +73,11 @@ def generate_negative_img(
             # Extract raw unscaled pixels (e.g., 1120x1120) for resize2.py to process later
             img = tif_area.read(window=window, out_shape=(tif_area.count, int(window.height), int(window.width)))
             img = np.transpose(img, (1, 2, 0))  # Convert to HWC format
-            bounds = tif_area.window_bounds(window)
+            win_bounds = tif_area.window_bounds(window)
+            cx = (win_bounds[0] + win_bounds[2]) / 2.0
+            cy = (win_bounds[1] + win_bounds[3]) / 2.0
+            half_dim = (window_size * desired_scale) / 2.0
+            bounds = (cx - half_dim, cy - half_dim, cx + half_dim, cy + half_dim)
             return img, bounds
 
     raise RuntimeError(f"Could not find a valid data window after {max_attempts} attempts.")
@@ -84,7 +88,15 @@ def generate_negative_samples(site_data:SiteData, num_positive_samples: int, pos
 
     with site_data.access_tif() as tif_area:
         for n in range(num_to_generate):
-           img, bounds = generate_negative_img(tif_area, site_data.m_px, window_size, desired_scale, positive_polygon_boundaries)
-           datapoint = DataPoint(site_data.name, GROUND_CLASS, shapely.geometry.box(*bounds), site_data.crs, img, bounds, site_data.m_px)
-           resize_datapoint_image(datapoint, desired_scale)
-           yield datapoint
+            img, bounds = generate_negative_img(tif_area, site_data.m_px, window_size, desired_scale, positive_polygon_boundaries)
+            datapoint = DataPoint(
+                site_data.name,
+                GROUND_CLASS,
+                shapely.geometry.box(*bounds),
+                site_data.crs,
+                img,
+                bounds,
+                m_px=site_data.pixel_scale,
+            )
+            resize_datapoint_image(datapoint, desired_scale, window_size=window_size)
+            yield datapoint
