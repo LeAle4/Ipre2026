@@ -1,1 +1,0 @@
-#Coming soon: Simple script to do get high level statistics from the sites and the images generated.
