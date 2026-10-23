@@ -1,11 +1,12 @@
+from __future__ import annotations
 from typing import Generator
 
+import math
 import random
 import rasterio
 import shapely
 import numpy as np
 from resize import resize_datapoint_image
-from extract import scale_bounds
 from datamanager import SiteData, DataPoint
 from parameters import DEFAULT_NEGATIVES_RATIO, DEFAULT_TARGET_SCALE, DEFAULT_WINDOW_SIZE, GROUND_CLASS
 
@@ -31,6 +32,50 @@ def in_actual_data(tif_area, view_window:rasterio.windows.Window, no_data_value,
     fraction_valid = valid_pixels / total_pixels if total_pixels > 0 else 0
     
     return fraction_valid >= threshold
+
+def calculate_target_extent(
+    current_meters: float,
+    desired_window_px: int,
+    stride_px: int,
+    desired_scale: float,
+    eps: float = 1e-6
+) -> float:
+    """Calculates ground distance in meters needed so that after scaling to
+    desired_scale (m/px), the pixel dimensions fit desired_window_px + k * stride_px.
+    """
+    current_px = current_meters / desired_scale
+    if current_px <= desired_window_px + eps:
+        target_px = desired_window_px
+    else:
+        k = math.ceil((current_px - desired_window_px - eps) / stride_px)
+        target_px = desired_window_px + k * stride_px
+    
+    return target_px * desired_scale
+
+
+def scale_bounds(
+    bounds: tuple[float, float, float, float],
+    desired_window_size: int,
+    stride: int,
+    desired_metric_scale: float
+) -> tuple[float, float, float, float]:
+    """Expands bounding box (minx, miny, maxx, maxy) in ground meters based on desired_scale."""
+    minx, miny, maxx, maxy = bounds
+    width = maxx - minx
+    height = maxy - miny
+
+    new_width = calculate_target_extent(width, desired_window_size, stride, desired_metric_scale)
+    new_height = calculate_target_extent(height, desired_window_size, stride, desired_metric_scale)
+
+    center_x = (minx + maxx) / 2.0
+    center_y = (miny + maxy) / 2.0
+
+    return (
+        center_x - new_width / 2.0,
+        center_y - new_height / 2.0,
+        center_x + new_width / 2.0,
+        center_y + new_height / 2.0
+    )
 
 def not_in_positive_polygons(window:rasterio.windows.Window, transform, positive_polygon_boundaries: tuple[shapely.geometry.Polygon]) -> bool:
     """Check if the specified window does not intersect with any positive polygons.

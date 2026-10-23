@@ -4,7 +4,7 @@ A Python-based toolkit for extracting, standardizing, and generating machine lea
 
 ## Overview
 
-The processing pipeline ingests raw orthomosaic TIF files and GeoPackage vector label files (`.gpkg`), standardizes spatial resolution using Lagrange-Chebyshev Interpolation (LCI), extracts sliding-window positive crops over geoglyph polygons, samples non-overlapping negative background patches, and exports ML-ready image files along with rich site-level and crop-level metadata.
+The processing pipeline ingests raw orthomosaic TIF files and GeoPackage vector label files (`.gpkg`), standardizes spatial resolution to a target metric scale (m/px) using area-weighted downsampling or Lagrange-Chebyshev Interpolation (LCI), extracts integer grid-aligned sliding-window positive crops over geoglyph polygons, samples non-overlapping negative background patches, and exports ML-ready image files along with rich site-level and crop-level metadata and vector geometries.
 
 ---
 
@@ -16,8 +16,9 @@ The processing pipeline ingests raw orthomosaic TIF files and GeoPackage vector 
 │   ├── sites_metadata.csv      # Global metadata summary across all study sites
 │   ├── Unita/                  # ML dataset assets for site Unita
 │   │   ├── image_metadata.csv  # Crop-level metadata for site Unita
-│   │   ├── shape_geometries.gpkg # Spatial geometries for generated crops
-│   │   └── Unita_*.png         # Extracted positive & negative PNG crops (224x224)
+│   │   ├── shape_geometries.gpkg   # Spatial geometries for generated individual crops
+│   │   ├── polygon_geometries.gpkg # Spatial geometries for parent geoglyph polygons
+│   │   └── Unita_*.png         # Extracted positive & negative PNG crops (e.g. 224x224)
 │   ├── ChugChug/               # ML dataset assets for site ChugChug
 │   └── Lluta/                  # ML dataset assets for site Lluta
 │
@@ -29,23 +30,19 @@ The processing pipeline ingests raw orthomosaic TIF files and GeoPackage vector 
 ├── pipeline.py                 # Pipeline execution entrypoint script
 ├── pipeline_config.json        # Centralized JSON configuration for pipeline runs
 ├── datamanager.py              # Data structures (SiteData, DataPoint, DataWriter) & IO
-├── extract.py                  # Extractor for polygon region bounding boxes
-├── resize.py                   # Lagrange-Chebyshev Interpolation (LCI) image resizer
-├── crop.py                     # Sliding-window crop generator with spatial filtering
-├── negatives.py                # Random spatial negative sample sampler
+├── extract.py                  # Extractor for polygon region bounding boxes and grid snapping
+├── resize.py                   # Image resizer (Area-Weighted Averaging & LCI)
+├── crop.py                     # Sliding-window crop generator with spatial intersection filtering
+├── negatives.py                # Random spatial negative background sampler
 ├── parameters.py               # Global class constants and fallback defaults
-│
-├── training/                   # Model training and evaluation scripts
-│   └── train.py                # Model training script
-└── visualization/              # Dataset exploration and plotting tools
-    └── data_properties.py      # Statistical and visual analysis tools
+└── README.md                   # Project documentation
 ```
 
 ---
 
 ## Quick Start: Running `pipeline.py`
 
-The primary execution point for the dataset generation pipeline is [`pipeline.py`](pipeline.py).
+The primary execution entrypoint for the dataset generation pipeline is [`pipeline.py`](pipeline.py).
 
 ### Running the Pipeline
 
@@ -56,11 +53,18 @@ python pipeline.py
 ```
 
 ### Execution Flow of `pipeline.py`
+
 When executed, [`pipeline.py`](pipeline.py):
-1. **Loads Configuration**: Reads run parameters from [`pipeline_config.json`](pipeline_config.json) (data directory path, scale, crop window size, stride, content threshold, and negatives ratio).
-2. **Site Discovery**: Scans `data_dir` and automatically instantiates [`SiteData`](datamanager.py#L66) objects for all subdirectories containing orthomosaic TIFs and GeoPackage labels.
-3. **Site Iteration**: Loops through each site, initializes a [`DataWriter`](datamanager.py#L177) session, extracts geoglyph polygons, resizes them, generates sliding-window positive crops, and samples negative ground crops.
-4. **Export**: Saves all processed PNG crop images into `ML/<SiteName>/`, exports per-site `image_metadata.csv` and `shape_geometries.gpkg`, and writes the aggregate global `ML/sites_metadata.csv`.
+1. **Loads Configuration**: Reads run parameters from [`pipeline_config.json`](pipeline_config.json) (`data_dir`, `target_scale`, `window_size`, `stride`, `threshold_crop_content`, and `negatives_ratio`).
+2. **Site Discovery & CRS Check**: Scans `data_dir` and instantiates [`SiteData`](datamanager.py#L128) objects for each site subdirectory. Validates the Coordinate Reference System (CRS) against the expected metric projection (`EPSG:32719`, UTM Zone 19S) and extracts per-axis pixel scale (`PixelScale`).
+3. **Site Iteration**:
+   - Initializes a [`DataWriter`](datamanager.py#L290) session and runs memory-efficient block-wise channel statistics across raster blocks (`block_windows`) without loading entire multi-gigabyte rasters into memory.
+   - Extracts geoglyph polygons via [`get_polygon_imgs`](extract.py#L111), snapping bounds to the integer crop grid (`window_size + k * stride`) and extracting raw unscaled source pixels.
+   - Adds parent geoglyphs to `polygon_geometries.gpkg`.
+   - Resizes extracted patches to `target_scale` using [`resize_datapoint_image`](resize.py#L170) (defaulting to area-weighted averaging).
+   - Generates sliding-window crops with [`generate_crops`](crop.py#L38), filtering by spatial coverage threshold ($\ge \text{threshold\_crop\_content}$) while guaranteeing at least one crop per geoglyph.
+   - Mines negative background crops via [`generate_negative_samples`](negatives.py#L85), validating against nodata areas and ensuring zero spatial overlap with positive geoglyphs.
+4. **Export**: Saves all processed PNG crop images into `ML/<SiteName>/`, writes per-site `image_metadata.csv`, `shape_geometries.gpkg`, and `polygon_geometries.gpkg`, and compiles the global `ML/sites_metadata.csv`.
 
 ---
 
@@ -102,19 +106,19 @@ All pipeline execution parameters are centralized in [`pipeline_config.json`](pi
 
 ## End-to-End Data Processing Pipeline Overview
 
-Data flows sequentially through six main stages:
+Data flows sequentially through six primary stages:
 
 ```
 [Raw Site Data (TIF + GPKG)]
            │
            ▼
-1. Site Discovery & Spatial Metadata Parsing (datamanager.py)
+1. Site Discovery, CRS Validation & Blockwise Statistics (datamanager.py)
            │
            ▼
-2. Polygon Extent Target Expansion (extract.py)
+2. Integer Grid Snapping & Raw Pixel Extraction (extract.py)
            │
            ▼
-3. Lagrange-Chebyshev Resizing & Grid Snapping (resize.py)
+3. Image Resizing (Area-Weighted Downsampling / LCI) (resize.py)
            │
            ▼
 4. Sliding Window Crop Generation & Coverage Thresholding (crop.py)
@@ -123,26 +127,33 @@ Data flows sequentially through six main stages:
 5. Non-Overlapping Negative Sample Mining (negatives.py)
            │
            ▼
-6. ML-Ready Dataset & Metadata Export (datamanager.py) ──► [ML Directory]
+6. ML-Ready Dataset & Multi-Table Export (datamanager.py) ──► [ML Directory]
 ```
 
 ### Stage Details
 
-1. **Site Discovery & Spatial Metadata Parsing ([`datamanager.py`](datamanager.py))**:
+1. **Site Discovery & CRS Validation ([`datamanager.py`](datamanager.py))**:
    - `get_sites()` inspects `data_dir` for site directories.
-   - Parses spatial metadata from orthomosaic headers (`CRS`, bounding box, Affine transform, channel count, nodata value).
-   - Determines native spatial resolution (`m_px`) and calculates ground dimensions in meters.
+   - `validate_crs()` checks that site orthomosaics match the expected metric projection (`TARGET_UTM_EPSG = 32719`, WGS 84 / UTM Zone 19S) and warns if geographic CRS or alternate datums are present.
+   - `get_pixel_scale()` preserves independent X and Y pixel dimensions via `PixelScale(x, y)`, computing latitude-corrected ground dimensions if geographic.
+   - Reprojects vector label GeoDataFrames to the raster CRS on load if necessary.
+   - Calculates per-channel minimum, maximum, and average using block-by-block streaming (`tif_area.block_windows()`) to prevent out-of-memory errors on massive orthomosaics.
 
-2. **Polygon Extent Extraction ([`extract.py`](extract.py))**:
+2. **Polygon Extent Extraction & Integer Grid Snapping ([`extract.py`](extract.py))**:
    - Filters GeoPackage vector labels for positive geoglyph polygons (`GEO_CLASS = 1`).
-   - For each polygon, `scale_bounds()` calculates expanded real-world ground boundaries in meters centered around the geoglyph so that after scaling to `target_scale`, the pixel dimensions perfectly fit `window_size + k * stride`.
-   - Extracts raw unscaled source pixels directly from the TIF raster.
+   - `snap_bounds_integer()` converts ground coordinates to target pixel coordinates (`coord / desired_scale`), applies `math.floor` to minimums and `math.ceil` to maximums, and snaps pixel dimensions to `window_size + k * stride` ($k \ge 0$).
+   - Symmetrically distributes residual padding so the geoglyph remains centered within the snapped bounding box.
+   - Extracts raw unscaled source pixels directly from the TIF raster using `rasterio.windows.from_bounds` without truncating pixel dimensions.
+   - Transposes image channels to standard HWC (`Height, Width, Channels`) numpy arrays.
 
-3. **LCI Image Resizing ([`resize.py`](resize.py))**:
-   - Resizes source patch imagery to `target_scale` (m/px) using **Lagrange-Chebyshev Interpolation (LCI)** (`lci()`), avoiding traditional bilinear blurring artifacts.
-   - `snap_to_crop_grid()` snaps the target pixel dimensions to exact grid multiples compatible with sliding-window sliding views.
+3. **Image Resizing & Precondition Validation ([`resize.py`](resize.py))**:
+   - `resize_datapoint_image()` computes target pixel dimensions directly from `datapoint.image_box.bounds` and strictly verifies that dimensions are already aligned with the crop grid (`(dim - window_size) % stride == 0`).
+   - **Area-Weighted Downsampling (`area_weighted_resize`)**: The default resampling method. Each output pixel represents the area-weighted average of source pixels it overlaps, preserving radiometric fidelity and avoiding Gibbs ringing artifacts on orthomosaic imagery.
+   - **Lagrange-Chebyshev Interpolation (`lci`)**: An alternative high-order polynomial image interpolation method utilizing Inverse Discrete Cosine Transforms (IDCT) for sharp resampling.
+   - Updates `datapoint.modify_image()` and symmetrically updates `datapoint.image_box` via `update_image_box()` keeping the spatial centroid fixed.
 
 4. **Sliding-Window Crop Generation ([`crop.py`](crop.py))**:
+   - Generates geographic crop boundaries in row-major order (top-to-bottom, left-to-right) via `calculate_crop_boundaries()`.
    - Applies row-major 2D sliding window (`view_as_windows`) of size `window_size` $\times$ `window_size` with step size `stride`.
    - Computes spatial intersection between each crop bounding box and the labeled geoglyph polygon geometry.
    - Yields crops whose intersection ratio ($\frac{\text{Area}(\text{Polygon} \cap \text{Crop})}{\text{Area}(\text{Crop})}$) meets or exceeds `threshold_crop_content`.
@@ -150,16 +161,18 @@ Data flows sequentially through six main stages:
 
 5. **Negative Sample Mining ([`negatives.py`](negatives.py))**:
    - Calculates target number of negative background samples ($N_{\text{neg}} = N_{\text{pos}} \times \text{negatives\_ratio}$).
-   - Randomly samples raw spatial candidate windows across the site orthomosaic.
+   - Randomly samples raw spatial candidate windows across the site orthomosaic in source pixel space.
    - Validates candidate windows using two criteria:
-     1. `in_actual_data()`: Ensures $\ge 99\%$ of window pixels are valid non-nodata data.
+     1. `in_actual_data()`: Ensures $\ge 99\%$ of window pixels are valid non-nodata data (evaluating dataset `nodata` or uint8 extremes).
      2. `not_in_positive_polygons()`: Verifies zero spatial intersection with all positive geoglyph geometries.
    - Resizes valid background patches to `target_scale` and outputs negative `DataPoint` crops (`DATA_LABEL = 2`).
 
-6. **ML Asset & Metadata Export ([`datamanager.py`](datamanager.py))**:
+6. **ML Asset & Multi-Table Export ([`datamanager.py`](datamanager.py))**:
    - Saves crop images as PNG files to `ML/<SiteName>/<ID>.png`.
-   - Exports per-site crop metadata to `ML/<SiteName>/image_metadata.csv` and vector geometries to `ML/<SiteName>/shape_geometries.gpkg`.
-   - Compiles global site spatial and channel statistics into `ML/sites_metadata.csv`.
+   - Exports per-site crop metadata to `ML/<SiteName>/image_metadata.csv`.
+   - Exports per-site crop vector geometries to `ML/<SiteName>/shape_geometries.gpkg`.
+   - Exports per-site parent geoglyph vector geometries to `ML/<SiteName>/polygon_geometries.gpkg`.
+   - Compiles global site spatial and multi-channel statistics into `ML/sites_metadata.csv`.
 
 ---
 
@@ -173,21 +186,24 @@ ML/
 │
 ├── Unita/                              # Study Area 1
 │   ├── image_metadata.csv              # Crop-level metadata CSV for Unita
-│   ├── shape_geometries.gpkg           # Spatial GeoPackage containing crop boundaries
-│   ├── Unita_00000_1.png               # Positive crop (Site_GeoID_CropID)
-│   ├── Unita_00000_2.png               # Positive crop 2 from same polygon
+│   ├── shape_geometries.gpkg           # Spatial GeoPackage of individual crop bounding boxes
+│   ├── polygon_geometries.gpkg         # Spatial GeoPackage of parent geoglyph polygons
+│   ├── Unita_02413_0.png               # Positive crop (Site_GeoID_CropID)
+│   ├── Unita_02413_1.png               # Positive crop from same parent polygon
 │   ├── ...
-│   ├── Unita_00045_1.png               # Negative background crop sample
+│   ├── Unita_02420_1.png               # Negative background crop sample
 │   └── ...
 │
 ├── ChugChug/                           # Study Area 2
 │   ├── image_metadata.csv
 │   ├── shape_geometries.gpkg
+│   ├── polygon_geometries.gpkg
 │   └── ChugChug_*.png
 │
 └── Lluta/                              # Study Area 3
     ├── image_metadata.csv
     ├── shape_geometries.gpkg
+    ├── polygon_geometries.gpkg
     └── Lluta_*.png
 ```
 
@@ -197,14 +213,14 @@ Each image saved in `ML/<SiteName>/` follows the standardized format:
 `{SITE_NAME}_{GEO_ID}_{CROP_ID}.png`
 
 - **`SITE_NAME`**: Name of the site (e.g. `Unita`).
-- **`GEO_ID`**: 5-digit zero-padded index of the parent polygon / sampled datapoint (e.g. `00000`).
-- **`CROP_ID`**: 5-digit zero-padded crop index within the parent datapoint (e.g. `00001`).
+- **`GEO_ID`**: 5-digit zero-padded index of the parent polygon / sampled datapoint (e.g. `02413`).
+- **`CROP_ID`**: Crop index within the parent datapoint (e.g. `0`, `1`, `2`...).
 
 ---
 
 ## Metadata Reference & Summaries
 
-The pipeline produces two CSV metadata tables: global [`sites_metadata.csv`](datamanager.py#L179) and per-site [`image_metadata.csv`](datamanager.py#L207).
+The pipeline produces tabular metadata and vector spatial layers:
 
 ### 1. `sites_metadata.csv` (Global Summary)
 
@@ -242,21 +258,31 @@ Located at `ML/<SiteName>/image_metadata.csv`. Contains one record per generated
 | `SITE_NAME` | `string` | Name of the study area to which the crop belongs. |
 | `ID` | `string` | Unique full composite ID (`{SITE_NAME}_{GEO_ID}_{CROP_ID}`). Matches image filename `{ID}.png`. |
 | `GEO_ID` | `string` | Parent polygon/datapoint ID (5-digit padded integer). |
-| `CROP_ID` | `string` | Sequential crop index within parent datapoint (5-digit padded integer). |
+| `CROP_ID` | `string` | Sequential crop index within parent datapoint (5-digit padded integer, e.g. `00000`). |
 | `DATA_LABEL` | `integer` | Numerical class label: `1` = Geoglyph (Positive), `2` = Ground (Negative). |
 | `SCALE_MPX` | `float` | Standardized spatial scale of crop image in meters per pixel (e.g., `0.05`). |
+| `CENTER_X` | `float` | X coordinate of the crop center in CRS units. |
+| `CENTER_Y` | `float` | Y coordinate of the crop center in CRS units. |
+| `AREA` | `float` | Spatial ground area of the crop in square meters. |
 | `CHANNELS` | `integer` | Number of color/spectral channels in crop image. |
 | `CRS` | `string` | Coordinate Reference System of the crop spatial bounds. |
 | `THRESHOLD_CLEAR` | `float` | Fraction ($0.0 \text{--} 1.0$) of geoglyph polygon spatial coverage inside the crop window. Set to `1.0` for negative ground samples. |
 
 ---
 
+### 3. Vector Geometries: `shape_geometries.gpkg` and `polygon_geometries.gpkg`
+
+Located in each site folder `ML/<SiteName>/`:
+- **`shape_geometries.gpkg`**: Contains the bounding box polygon geometries for each generated individual crop, along with crop IDs, centroid coordinates, and intersection proportions.
+- **`polygon_geometries.gpkg`**: Contains the original vector polygon geometries of each labeled geoglyph (`GEO_ID`), preserving the ground-truth archaeological footprint for spatial analysis and GIS mapping.
+
+---
+
 ## Technical Core Components
 
-- **[`datamanager.py`](datamanager.py)**: Central data abstractions (`SiteData`, `LabelTable`, `DataPoint`, `Crop`, `DataWriter`).
-- **[`extract.py`](extract.py)**: Bounding extent calculation and TIF spatial window extraction.
-- **[`resize.py`](resize.py)**: Image scaling using Lagrange-Chebyshev Interpolation (LCI) and crop grid snapping.
-- **[`crop.py`](crop.py)**: 2D sliding-window generation and Shapely polygon intersection analysis.
-- **[`negatives.py`](negatives.py)**: Random spatial background sampling with nodata and positive polygon non-overlap validation.
-- **[`parameters.py`](parameters.py)**: Default parameters and class mapping constants (`GEO_CLASS = 1`, `GROUND_CLASS = 2`).
-
+- **[`datamanager.py`](datamanager.py)**: Central data abstractions (`SiteData`, `LabelTable`, `DataPoint`, `Crop`, `DataWriter`), metric CRS validation, anisotropic pixel scale tracking, and windowed channel statistics.
+- **[`extract.py`](extract.py)**: Bounding extent calculation with integer grid expansion (`snap_bounds_integer`) and raw TIF raster extraction.
+- **[`resize.py`](resize.py)**: Image scaling via Area-Weighted Downsampling (`area_weighted_resize`) and Lagrange-Chebyshev Interpolation (`lci`), with crop-grid alignment assertion.
+- **[`crop.py`](crop.py)**: Row-major 2D sliding-window generation and Shapely polygon intersection analysis.
+- **[`negatives.py`](negatives.py)**: Random spatial background sampling with nodata validation and positive polygon non-overlap checks.
+- **[`parameters.py`](parameters.py)**: Default parameters and class mapping constants (`GEO_CLASS = 1`, `GROUND_CLASS = 2`, `ROAD_CLASS = 3`).
