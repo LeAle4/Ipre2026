@@ -1,0 +1,8 @@
+{
+    "data_dir": "data",
+    "target_scale": 0.05,
+    "window_size": 224,
+    "stride": 112,
+    "threshold_crop_content": 0.25,
+    "negatives_ratio": 3
+}
