@@ -13,6 +13,7 @@ The processing pipeline ingests raw orthomosaic TIF files and GeoPackage vector 
 ```
 .
 ├── ML/                         # Generated ML-ready output dataset directory
+│   ├── README.md               # ML output folder documentation & specifications
 │   ├── sites_metadata.csv      # Global metadata summary across all study sites
 │   ├── Unita/                  # ML dataset assets for site Unita
 │   │   ├── image_metadata.csv  # Crop-level metadata for site Unita
@@ -23,6 +24,7 @@ The processing pipeline ingests raw orthomosaic TIF files and GeoPackage vector 
 │   └── Lluta/                  # ML dataset assets for site Lluta
 │
 ├── data/                       # Raw input data directory (grouped by site folder)
+│   ├── README.md               # Input data guidelines & folder requirements
 │   ├── Unita/                  # Unita.tif, Unita_label.gpkg, Unita_DEM.tif
 │   ├── ChugChug/               # ChugChug.tif, ChugChug_label.gpkg, ChugChug_DEM.tif
 │   └── Lluta/                  # Lluta.tif, Lluta_label.gpkg
@@ -62,7 +64,7 @@ When executed, [`pipeline.py`](pipeline.py):
    - Extracts geoglyph polygons via [`get_polygon_imgs`](extract.py#L111), snapping bounds to the integer crop grid (`window_size + k * stride`) and extracting raw unscaled source pixels.
    - Adds parent geoglyphs to `polygon_geometries.gpkg`.
    - Resizes extracted patches to `target_scale` using [`resize_datapoint_image`](resize.py#L170) (defaulting to area-weighted averaging).
-   - Generates sliding-window crops with [`generate_crops`](crop.py#L38), filtering by spatial coverage threshold ($\ge \text{threshold\_crop\_content}$) while guaranteeing at least one crop per geoglyph.
+   - Generates sliding-window crops with [`generate_crops`](crop.py#L38), filtering by spatial coverage threshold ($\ge$ `threshold_crop_content`) while guaranteeing at least one crop per geoglyph.
    - Mines negative background crops via [`generate_negative_samples`](negatives.py#L85), validating against nodata areas and ensuring zero spatial overlap with positive geoglyphs.
 4. **Export**: Saves all processed PNG crop images into `ML/<SiteName>/`, writes per-site `image_metadata.csv`, `shape_geometries.gpkg`, and `polygon_geometries.gpkg`, and compiles the global `ML/sites_metadata.csv`.
 
@@ -94,7 +96,7 @@ All pipeline execution parameters are centralized in [`pipeline_config.json`](pi
 | `window_size` | `integer` | Pixel width and height ($W \times H$) for generated square crops (e.g. `224` for $224 \times 224$ neural network input). | `224` |
 | `stride` | `integer` | Step size in pixels for sliding window during crop generation (e.g., `112` yields 50% overlap). | `112` |
 | `threshold_crop_content` | `float` | Minimum ratio ($0.0 \text{--} 1.0$) of geoglyph polygon spatial coverage within a crop for it to be accepted as a positive sample. | `0.25` (25% coverage) |
-| `negatives_ratio` | `integer` / `float` | Multiplier determining the number of negative background crop samples generated per positive sample ($N_{\text{neg}} = N_{\text{pos}} \times \text{negatives\_ratio}$). | `3` |
+| `negatives_ratio` | `integer` / `float` | Multiplier determining the number of negative background crop samples generated per positive sample ($N_{\text{neg}} = N_{\text{pos}} \times$ `negatives_ratio`). | `3` |
 
 ### Modifying Configuration
 
@@ -160,7 +162,7 @@ Data flows sequentially through six primary stages:
    - Guarantees at least one crop is retained per geoglyph (yielding the crop with maximum intersection ratio if none meet the threshold).
 
 5. **Negative Sample Mining ([`negatives.py`](negatives.py))**:
-   - Calculates target number of negative background samples ($N_{\text{neg}} = N_{\text{pos}} \times \text{negatives\_ratio}$).
+   - Calculates target number of negative background samples ($N_{\text{neg}} = N_{\text{pos}} \times$ `negatives_ratio`).
    - Randomly samples raw spatial candidate windows across the site orthomosaic in source pixel space.
    - Validates candidate windows using two criteria:
      1. `in_actual_data()`: Ensures $\ge 99\%$ of window pixels are valid non-nodata data (evaluating dataset `nodata` or uint8 extremes).
